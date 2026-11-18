@@ -1,0 +1,1054 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Time Geometry Calculator</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* ---------- tokens: netral hangat, aksen merah & kuning terang ---------- */
+:root{
+  --bg:#FAF8F5; --panel:#FFFFFF; --panel2:#F3F0EA; --line:#E4DFD8; --ink:#1C1A17; --muted:#6B655E;
+  --red:#E5322D; --red-ink:#B4231F; --red-soft:#FCE8E6;
+  --yel:#FFD23F; --yel-ink:#8A6400; --yel-soft:#FFF4C7;
+  --hover:#F3F0EA; --focus:#E5322D;
+  --tip-bg:#1C1A17; --tip-ink:#FAF8F5;
+  --on-red:#FFFFFF; --on-yel:#1C1A17;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#151412; --panel:#1E1C19; --panel2:#262320; --line:#34312C; --ink:#EEE9E1; --muted:#A29B91;
+    --red:#FF4D47; --red-ink:#FF8580; --red-soft:#3A1A18;
+    --yel:#FFD84A; --yel-ink:#FFD84A; --yel-soft:#3A3010;
+    --hover:#262320; --focus:#FFD84A;
+    --tip-bg:#EEE9E1; --tip-ink:#151412;
+    --on-red:#FFFFFF; --on-yel:#151412;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#151412; --panel:#1E1C19; --panel2:#262320; --line:#34312C; --ink:#EEE9E1; --muted:#A29B91;
+  --red:#FF4D47; --red-ink:#FF8580; --red-soft:#3A1A18;
+  --yel:#FFD84A; --yel-ink:#FFD84A; --yel-soft:#3A3010;
+  --hover:#262320; --focus:#FFD84A;
+  --tip-bg:#EEE9E1; --tip-ink:#151412;
+  --on-red:#FFFFFF; --on-yel:#151412;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "IBM Plex Sans",system-ui,sans-serif;padding-inline:16px;padding-block:16px 24px}
+.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+h1{font-size:21px;font-weight:600;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:12.5px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 10px}
+.sub{color:var(--muted);margin:0;max-width:70ch;font-size:14px}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:6px;padding:8px 12px;min-height:40px}
+button.small{padding:4px 10px;min-height:32px;font-size:13px}
+button.icon{width:40px;height:40px;padding:0;display:inline-flex;align-items:center;justify-content:center}
+button.icon svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+button:hover{background:var(--hover)}
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+textarea,input[type=text],input[type=number],select{
+  font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%;min-height:40px}
+textarea{min-height:140px;resize:vertical;font-family:"IBM Plex Mono",monospace;font-size:13px}
+select:disabled,input:disabled{opacity:.5;cursor:not-allowed}
+.hint{font-size:12.5px;color:var(--muted);margin-top:6px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+
+/* ---------- app grid ---------- */
+.app{display:grid;grid-template-columns:300px minmax(0,1fr);grid-template-areas:"hdr hdr" "side main";gap:20px;max-width:1280px;margin:0 auto}
+header{grid-area:hdr;display:grid;gap:10px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.title-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.hdr-right{display:flex;align-items:center;gap:10px}
+.saved{font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:6px;min-width:0}
+.saved::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--yel);flex:none}
+.saved.err::before{background:var(--red)}
+#themeBtn{display:none}
+:root[data-standalone] #themeBtn{display:inline-flex}
+.market-bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel);flex:none}
+.segbtn{border:0;border-radius:0;padding:0 16px;min-height:38px;font-weight:600;letter-spacing:.02em;color:var(--muted);background:transparent}
+.segbtn+.segbtn{border-left:1px solid var(--line)}
+.segbtn:hover{background:var(--hover)}
+.segbtn[aria-checked="true"]{background:var(--red);color:var(--on-red)}
+#mkIhsg[aria-checked="true"]{background:var(--yel);color:var(--on-yel)}
+.segbtn:focus-visible{outline-offset:-3px;outline-color:var(--yel)}
+.side{grid-area:side;display:grid;gap:14px;align-content:start;position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto;padding-right:2px}
+.main{grid-area:main;display:grid;gap:18px;align-content:start;min-width:0}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.tabs{display:none}
+
+/* ---------- settings groups ---------- */
+details.group{border-top:1px solid var(--line);padding-block:6px}
+details.group:first-of-type{border-top:0}
+details.group>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13.5px;font-weight:600;padding:8px 0;min-height:40px;user-select:none}
+details.group>summary::-webkit-details-marker{display:none}
+details.group>summary::after{content:"";margin-left:auto;width:7px;height:7px;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);transform:rotate(45deg);transition:transform .15s}
+details.group[open]>summary::after{transform:rotate(-135deg)}
+details.group>.gbody{padding:2px 0 10px}
+.gh{display:flex;align-items:center;gap:6px}
+.info{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:1px solid var(--muted);color:var(--muted);font-size:11px;font-weight:600;font-style:italic;font-family:Georgia,serif;line-height:1;cursor:help;text-transform:none;letter-spacing:0;flex:none;background:transparent;padding:0;min-height:0}
+.info:hover,.info[aria-expanded="true"]{border-color:var(--red);color:var(--red-ink);background:var(--red-soft)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-family:"IBM Plex Mono",monospace;font-size:12.5px;padding:0 10px;min-height:32px;display:inline-flex;align-items:center;gap:6px;border-radius:999px;background:var(--bg);border:1px solid var(--line);color:var(--ink)}
+.chip.toggle{cursor:pointer;user-select:none}
+.chip.toggle .w{font-size:11px;color:var(--muted)}
+.chip.toggle[aria-pressed="true"]{background:var(--yel-soft);border-color:var(--yel);color:var(--ink)}
+.chip.toggle[aria-pressed="true"] .w{color:var(--yel-ink)}
+.chip.toggle[aria-pressed="false"]{opacity:.55;text-decoration:line-through}
+.wgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:6px;margin-top:8px}
+.wgrid label{margin:0;font-family:"IBM Plex Mono",monospace;font-size:12px}
+.wgrid input{min-height:34px;padding:4px 8px;font-family:"IBM Plex Mono",monospace;font-size:13px}
+details.sub{margin-top:8px}
+details.sub>summary{font-size:13px;color:var(--muted);cursor:pointer;min-height:32px;display:flex;align-items:center}
+.switch-row{display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:40px}
+.switch-row label{color:var(--ink);font-size:14px;margin:0}
+.switch{appearance:none;-webkit-appearance:none;width:46px;height:26px;border-radius:999px;background:var(--line);border:1px solid var(--line);position:relative;cursor:pointer;margin:0;flex:none;transition:background .15s}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .15s}
+.switch:checked{background:var(--red);border-color:var(--red)}
+.switch:checked::after{transform:translateX(20px)}
+
+/* ---------- profil ---------- */
+.prof-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+.prof-actions .small{width:100%}
+button.danger{color:var(--red-ink);border-color:var(--red-soft)}
+button.danger:hover{background:var(--red-soft);border-color:var(--red)}
+#profSel{font-weight:600}
+.prof-dirty{color:var(--red-ink)}
+.modal{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px}
+.modal[hidden]{display:none}
+.modal .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;width:min(420px,100%);box-shadow:0 10px 32px rgba(0,0,0,.3)}
+.modal h3{margin:0 0 4px;font-size:15px;font-weight:600}
+.modal p{margin:0 0 10px;font-size:13px;color:var(--muted)}
+.modal .row{justify-content:flex-end;margin-top:12px}
+
+/* ---------- swing input ---------- */
+.series{border-top:3px solid var(--red)}
+.series.low{border-top-color:var(--yel)}
+.series.high h2{color:var(--red-ink)}
+.series.low h2{color:var(--yel-ink)}
+.swing-list{display:grid;gap:8px;margin-top:8px}
+.swing-row{display:grid;grid-template-columns:minmax(0,1fr) 40px 40px 40px;gap:6px;align-items:center}
+.swing-row input[type=text]{font-family:"IBM Plex Mono",monospace;font-size:14px;letter-spacing:.02em}
+.swing-row .bad{border-color:var(--red);background:var(--red-soft)}
+.swing-row .chk{display:flex;align-items:center;justify-content:center;width:40px;height:40px;border:1px solid var(--line);border-radius:6px;background:var(--panel);cursor:pointer;margin:0}
+.swing-row .chk input{width:20px;height:20px;margin:0;accent-color:var(--red);cursor:pointer}
+.swing-row.off input[type=text]{opacity:.45;text-decoration:line-through}
+.msg{font-size:13px;padding:8px 10px;border-radius:6px;margin-top:8px;display:flex;gap:8px;align-items:flex-start}
+.msg svg{width:16px;height:16px;flex:none;margin-top:2px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round}
+.msg.err{background:var(--red-soft);color:var(--red-ink);border-left:3px solid var(--red)}
+.msg.info{background:var(--yel-soft);color:var(--yel-ink)}
+.intervals{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.intervals .chip{min-height:28px}
+.series.high .intervals .chip{border-color:var(--red)}
+.series.low .intervals .chip{border-color:var(--yel)}
+.chip.cross{border-style:dashed;background:var(--panel2)}
+
+/* ---------- results ---------- */
+.stats{font-size:12.5px;color:var(--muted);margin-bottom:8px}
+.tblwrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);line-height:1.3;vertical-align:bottom}
+td{padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:middle;white-space:nowrap}
+tr.hit{cursor:pointer}
+tr.hit:hover td,tr.hit[aria-expanded="true"] td{background:var(--hover)}
+tr.hit td:first-child::before{content:"";display:inline-block;width:6px;height:6px;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);transform:rotate(-45deg);margin-right:8px;transition:transform .15s;vertical-align:middle}
+tr.hit[aria-expanded="true"] td:first-child::before{transform:rotate(45deg)}
+tr.past td{opacity:.62}
+tr.past td:first-child::after{content:"lewat";font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:0 4px;margin-left:8px;vertical-align:middle}
+tr.nowline td{padding:0;border-bottom:0}
+tr.nowline .nl{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--red-ink);font-weight:600}
+tr.nowline .nl::before,tr.nowline .nl::after{content:"";height:1px;background:var(--red);flex:1;opacity:.55}
+tr.detail td{white-space:normal;background:var(--panel2);padding:8px 12px 10px 30px;font-family:"IBM Plex Mono",monospace;font-size:12.5px;line-height:1.55;color:var(--ink)}
+tr.detail .lost{opacity:.45;text-decoration:line-through}
+.detail .cx{color:var(--red-ink);font-weight:500}
+.series.low tr.detail .lost{opacity:.45;text-decoration:line-through}
+.detail .cx{color:var(--yel-ink)}
+td.score{width:1%}
+.meter{display:flex;align-items:center;gap:8px}
+.bar{height:8px;border-radius:2px;background:var(--red);min-width:2px}
+.series.low .bar{background:var(--yel)}
+.rank{display:inline-block;font-size:11px;padding:1px 6px;border-radius:3px;background:var(--red-soft);color:var(--red-ink);font-weight:600}
+.series.low .rank{background:var(--yel-soft);color:var(--yel-ink)}
+.dow{color:var(--muted);font-size:12.5px;margin-left:6px}
+@media (max-width:480px){.meter .hint{display:none}.dow{font-size:11.5px;margin-left:4px}}
+.empty{color:var(--muted);font-size:14px;padding:12px 0}
+.onboard{display:grid;gap:14px}
+.onboard ol{margin:0;padding:0;list-style:none;display:grid;gap:10px;counter-reset:s}
+.onboard li{display:flex;gap:12px;align-items:flex-start;counter-increment:s}
+.onboard li::before{content:counter(s);flex:none;width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:600;font-size:13px;background:var(--yel);color:var(--on-yel)}
+.onboard li b{display:block;font-weight:600}
+.onboard li span{color:var(--muted);font-size:13.5px}
+
+/* ---------- popover & picker ---------- */
+.tip{position:absolute;z-index:30;background:var(--tip-bg);color:var(--tip-ink);font-size:12.5px;line-height:1.45;padding:9px 11px;border-radius:6px;max-width:min(320px,calc(100vw - 24px));box-shadow:0 4px 14px rgba(0,0,0,.25);white-space:normal}
+.tip[hidden]{display:none}
+.picker{position:absolute;z-index:40;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;box-shadow:0 6px 20px rgba(0,0,0,.22);width:min(300px,calc(100vw - 24px));font-size:13.5px}
+.picker[hidden]{display:none}
+.picker .ph{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:6px}
+.picker .ph .m{font-weight:600;font-family:"IBM Plex Mono",monospace}
+.picker .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
+.picker .dh{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding:2px 0}
+.picker .d{border:0;background:none;color:var(--ink);padding:0;min-height:38px;border-radius:6px;font-family:"IBM Plex Mono",monospace;font-size:13px;cursor:pointer}
+.picker .d:hover{background:var(--hover)}
+.picker .d.off{color:var(--muted);opacity:.45;cursor:not-allowed;text-decoration:line-through}
+.picker .d.off:hover{background:none}
+.picker .d.other{opacity:.35}
+.picker .d.sel{background:var(--red);color:var(--on-red);font-weight:600}
+.picker .d.today{box-shadow:inset 0 0 0 2px var(--yel)}
+.picker .pf{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:12px;color:var(--muted)}
+.picker .pf .cur{font-family:"IBM Plex Mono",monospace}
+
+/* ---------- responsive ---------- */
+@media (max-width:1100px){
+  .app{grid-template-columns:1fr;grid-template-areas:"hdr" "side" "main"}
+  .side{position:static;max-height:none;overflow:visible;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+}
+@media (max-width:820px),(max-height:520px){
+  .app{display:block}
+  .side,.main{display:contents}
+  .tabs{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--panel);border-top:1px solid var(--line);padding:6px 10px calc(6px + env(safe-area-inset-bottom));gap:6px}
+  .tabs button{flex:1;border:0;background:transparent;min-height:44px;font-weight:600;color:var(--muted);border-radius:8px}
+  .tabs button[aria-selected="true"]{background:var(--red-soft);color:var(--red-ink)}
+  body{padding-bottom:76px}
+  .v-input,.v-hasil,.v-set{display:none}
+  .app[data-tab="input"] .v-input,.app[data-tab="hasil"] .v-hasil,.app[data-tab="set"] .v-set{display:block}
+  .app[data-tab="input"] .two.v-input,.app[data-tab="hasil"] .two.v-hasil{display:grid}
+  .v-input+.v-input,.v-hasil+.v-hasil,.v-set+.v-set{margin-top:14px}
+  .app>.v-input,.app>.v-hasil,.app>.v-set{margin-top:14px}
+  header{margin-bottom:0}
+}
+@media (max-height:520px){
+  body{padding-top:8px;padding-bottom:16px}
+  header{gap:6px;padding-bottom:8px}
+  h1{font-size:17px}
+  .sub{display:none}
+  .segbtn{min-height:32px}
+  .tabs{position:sticky;top:0;bottom:auto;border-top:0;border-bottom:1px solid var(--line);padding:4px 0;margin-top:8px}
+  .tabs button{min-height:36px}
+  td{padding:5px 8px}
+  .panel{padding:10px 12px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="app" id="app" data-tab="input">
+  <header>
+    <div class="title-row">
+      <h1>Time Geometry Calculator</h1>
+      <div class="hdr-right">
+        <span class="saved" id="savedAt">Belum tersimpan</span>
+        <button type="button" class="small" id="themeBtn" aria-label="Ganti tema">Tema: Auto</button>
+      </div>
+    </div>
+    <div class="market-bar">
+      <span class="seg" role="radiogroup" aria-label="Pasar">
+        <button type="button" class="segbtn" id="mkIhsg" role="radio" aria-checked="true" data-market="ihsg">IHSG</button>
+        <button type="button" class="segbtn" id="mkGlobal" role="radio" aria-checked="false" data-market="global">Global</button>
+      </span>
+      <p class="sub" id="subIhsg">Proyeksi tanggal swing high dan swing low berikutnya dari jarak antar swing sebelumnya × rasio Fibonacci. Jarak dihitung dalam hari bursa; weekend dan libur bursa dilewati.</p>
+      <p class="sub" id="subGlobal" hidden>Proyeksi tanggal swing high dan swing low berikutnya dari jarak antar swing sebelumnya × rasio Fibonacci. Libur bursa tidak dihitung; weekend bisa disertakan untuk pasar 7 hari seperti crypto.</p>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs" aria-label="Navigasi">
+    <button type="button" data-tab="input" aria-selected="true">Input</button>
+    <button type="button" data-tab="hasil" aria-selected="false">Hasil</button>
+    <button type="button" data-tab="set" aria-selected="false">Pengaturan</button>
+  </nav>
+
+  <aside class="side">
+    <section class="panel v-input" id="panelProfile">
+      <h2 class="gh"><span id="profTitle">Emiten</span><button type="button" class="info" data-tip="Tiap profil menyimpan satu daftar swing high dan low, misalnya satu emiten atau satu komoditas. Pengaturan skor dan daftar libur bursa berlaku untuk semua profil, jadi tidak ikut tersimpan di sini. Profil IHSG dan Global terpisah. Semua tersimpan di browser ini saja; pakai Ekspor untuk memindahkannya." aria-label="Keterangan" aria-expanded="false">i</button></h2>
+      <select id="profSel" aria-label="Pilih profil"></select>
+      <div class="prof-actions">
+        <button type="button" class="small" id="profSave">Simpan</button>
+        <button type="button" class="small" id="profSaveAs">Simpan sebagai…</button>
+        <button type="button" class="small" id="profRename">Ganti nama</button>
+        <button type="button" class="small danger" id="profDelete">Hapus</button>
+      </div>
+      <div class="hint" id="profHint"></div>
+      <details class="sub">
+        <summary>Cadangkan semua profil</summary>
+        <div class="prof-actions" style="margin-top:6px">
+          <button type="button" class="small" id="profExport">Ekspor</button>
+          <button type="button" class="small" id="profImport">Impor</button>
+          <input type="file" id="profFile" accept=".json,application/json" hidden>
+        </div>
+        <div class="hint">Ekspor menampilkan teks yang bisa Anda salin dan simpan sendiri; impor menerima teks itu atau sebuah file. Impor menambahkan profil baru dan hanya menimpa yang namanya sama.</div>
+      </details>
+    </section>
+
+    <section class="panel v-input" id="panelWeekend" hidden>
+      <h2 class="gh">Kalender pasar<button type="button" class="info" data-tip="Off: hanya Senin–Jumat dihitung sebagai bar (saham, indeks, forex). On: Sabtu dan Minggu ikut dihitung (crypto, pasar 7 hari)." aria-label="Keterangan" aria-expanded="false">i</button></h2>
+      <div class="switch-row">
+        <label for="wkOn">Sertakan weekend</label>
+        <input type="checkbox" id="wkOn" class="switch">
+      </div>
+    </section>
+
+    <section class="panel v-input" id="panelHolidays">
+      <h2 class="gh">Libur bursa<button type="button" class="info" data-tip="Satu tanggal per baris; format DD-MM-YY, DD-MM-YYYY, atau YYYY-MM-DD. Weekend dikecualikan otomatis. Daftar tersimpan di browser ini. Lengkapi hingga jauh ke depan: proyeksi yang jatuh setelah libur terakhir yang tercatat bisa bergeser bila ada libur yang belum diinput." aria-label="Keterangan" aria-expanded="false">i</button></h2>
+      <textarea id="holidays" spellcheck="false" aria-label="Daftar libur bursa, satu tanggal per baris"></textarea>
+      <div class="hint" id="holStat"></div>
+    </section>
+
+    <section class="panel v-set" id="panelSettings">
+      <h2>Pengaturan skor</h2>
+
+      <details class="group" open>
+        <summary><span class="gh">Rasio Fibonacci<button type="button" class="info" data-tip="Jarak antar swing dikalikan tiap rasio yang aktif untuk mendapatkan jarak proyeksi. Ketuk rasio untuk mengaktifkan/menonaktifkan. Bobot adalah poin yang diberikan bila proyeksi rasio itu mengenai suatu tanggal. Bobot bawaan bukan tebakan: hasil kalibrasi pada 302 swing IHSG 2016-2026 dengan validasi silang 5 lipatan. Rasio kecil (0.5 dan 0.786) terbukti paling kuat; 1.5, 1.618 dan 2 paling lemah." aria-label="Keterangan" aria-expanded="false">i</button></span></summary>
+        <div class="gbody">
+          <div class="chips" id="fchips"></div>
+          <details class="sub"><summary>Ubah bobot</summary><div class="wgrid" id="fweights"></div></details>
+        </div>
+      </details>
+
+      <details class="group" open>
+        <summary><span class="gh">Toleransi ±1 bar<button type="button" class="info" data-tip="On: satu bar sebelum dan sesudah tanggal proyeksi ikut mendapat poin, sebesar bobot yang dipilih. Off: hanya tanggal proyeksi tepat yang dihitung; hasil lebih sedikit tetapi lebih tajam." aria-label="Keterangan" aria-expanded="false">i</button></span></summary>
+        <div class="gbody">
+          <div class="switch-row">
+            <label for="tolOn">Hitung tanggal ±1 bar</label>
+            <input type="checkbox" id="tolOn" class="switch" checked>
+          </div>
+          <label style="margin-top:6px" for="tolW">Poin untuk tanggal ±1 bar</label>
+          <select id="tolW">
+            <option value="0.5">0.5 poin (tepat = 1 poin)</option>
+            <option value="1">1 poin (sama dengan tepat)</option>
+          </select>
+        </div>
+      </details>
+
+      <details class="group" open>
+        <summary><span class="gh">Faktor silang H↔L<button type="button" class="info" data-tip="Jarak dari swing low terakhir ke swing high terakhir (atau sebaliknya, tergantung mana yang lebih baru) dikalikan rasio Fibonacci, lalu diproyeksikan dari swing paling akhir untuk mencari swing tipe lawannya. Dihitung sebagai interval terbaru. Pengali di bawah dikalikan ke semua poin dari faktor ini." aria-label="Keterangan" aria-expanded="false">i</button></span></summary>
+        <div class="gbody">
+          <div class="switch-row">
+            <label for="crossOn">Aktifkan faktor silang</label>
+            <input type="checkbox" id="crossOn" class="switch" checked>
+          </div>
+          <label style="margin-top:6px" for="crossW">Pengali poin faktor silang</label>
+          <input type="number" id="crossW" value="1" step="0.1" min="0" class="mono" style="width:100px">
+        </div>
+      </details>
+
+      <details class="group" open>
+        <summary><span class="gh">Interval lama<button type="button" class="info" data-tip="Interval terbaru selalu mendapat poin penuh. Bila dipilih menurun, setiap interval yang lebih lama dikalikan faktor ini sekali lagi: interval kedua terbaru ×0.8, ketiga ×0.64, dan seterusnya." aria-label="Keterangan" aria-expanded="false">i</button></span></summary>
+        <div class="gbody">
+          <label for="recency">Poin untuk interval yang lebih lama</label>
+          <select id="recency">
+            <option value="1">Sama dengan interval terbaru</option>
+            <option value="0.8">Menurun ×0.8 tiap interval ke belakang</option>
+            <option value="0.6">Menurun ×0.6 tiap interval ke belakang</option>
+          </select>
+        </div>
+      </details>
+    </section>
+  </aside>
+
+  <main class="main">
+    <div class="two v-input">
+      <section class="panel series high">
+        <div class="row" style="justify-content:space-between">
+          <h2 class="gh" style="margin:0">Swing High<button type="button" class="info" data-tip="Tanggal swing high yang sudah terbentuk. Ketik angka saja (otomatis jadi DD-MM-YY) atau pilih dari kalender; urutan bebas. Enter membuat baris baru. Hapus centang untuk mengabaikan sebuah tanggal tanpa menghapusnya. Jarak dihitung antar tanggal yang berurutan saja." aria-label="Keterangan" aria-expanded="false">i</button></h2>
+          <button type="button" class="small" data-add="high">+ Tambah</button>
+        </div>
+        <div class="swing-list" id="list-high"></div>
+        <div id="msg-high"></div>
+        <div class="intervals" id="int-high"></div>
+      </section>
+      <section class="panel series low">
+        <div class="row" style="justify-content:space-between">
+          <h2 class="gh" style="margin:0">Swing Low<button type="button" class="info" data-tip="Tanggal swing low yang sudah terbentuk. Ketik angka saja (otomatis jadi DD-MM-YY) atau pilih dari kalender; urutan bebas. Enter membuat baris baru. Hapus centang untuk mengabaikan sebuah tanggal tanpa menghapusnya. Jarak dihitung antar tanggal yang berurutan saja." aria-label="Keterangan" aria-expanded="false">i</button></h2>
+          <button type="button" class="small" data-add="low">+ Tambah</button>
+        </div>
+        <div class="swing-list" id="list-low"></div>
+        <div id="msg-low"></div>
+        <div class="intervals" id="int-low"></div>
+      </section>
+    </div>
+
+    <section class="panel v-hasil onboard" id="onboard" hidden>
+      <h2>Mulai</h2>
+      <ol>
+        <li><b>Lengkapi libur bursa</b><span id="ob1">Tempel daftar libur BEI di panel Libur bursa; weekend sudah dikecualikan otomatis.</span></li>
+        <li><b>Isi tanggal swing</b><span>Masukkan minimal dua swing high dan dua swing low yang sudah terbentuk, urutan bebas.</span></li>
+        <li><b>Baca hasil</b><span>Tanggal kandidat muncul di sini, terurut kronologis. Ketuk sebuah baris untuk melihat proyeksi mana saja yang mengenainya.</span></li>
+      </ol>
+    </section>
+
+    <div class="two v-hasil" id="results">
+      <section class="panel series high">
+        <h2 class="gh">Proyeksi swing high berikutnya<button type="button" class="info" data-tip="Tanggal kandidat diurutkan kronologis. Skor adalah jumlah poin dari proyeksi yang mengenai tanggal itu. Bila beberapa rasio dari interval yang SAMA membulat ke bar yang sama, hanya poin tertinggi yang dihitung dan sisanya ditandai &quot;lebur&quot;; proyeksi dari interval berbeda tetap dijumlahkan. #1–#3 menandai skor tertinggi. Ketuk atau klik baris untuk melihat rinciannya. Proyeksi dihitung sejak swing terakhir yang diinput, jadi tanggal yang sudah lewat ikut tampil: ditandai &quot;lewat&quot;, diredupkan, dan dipisahkan garis bertuliskan hari ini." aria-label="Keterangan" aria-expanded="false">i</button></h2>
+        <div class="stats" id="stat-high"></div>
+        <div class="tblwrap" id="res-high"></div>
+      </section>
+      <section class="panel series low">
+        <h2 class="gh">Proyeksi swing low berikutnya<button type="button" class="info" data-tip="Tanggal kandidat diurutkan kronologis. Skor adalah jumlah poin dari proyeksi yang mengenai tanggal itu. Bila beberapa rasio dari interval yang SAMA membulat ke bar yang sama, hanya poin tertinggi yang dihitung dan sisanya ditandai &quot;lebur&quot;; proyeksi dari interval berbeda tetap dijumlahkan. #1–#3 menandai skor tertinggi. Ketuk atau klik baris untuk melihat rinciannya. Proyeksi dihitung sejak swing terakhir yang diinput, jadi tanggal yang sudah lewat ikut tampil: ditandai &quot;lewat&quot;, diredupkan, dan dipisahkan garis bertuliskan hari ini." aria-label="Keterangan" aria-expanded="false">i</button></h2>
+        <div class="stats" id="stat-low"></div>
+        <div class="tblwrap" id="res-low"></div>
+      </section>
+    </div>
+  </main>
+</div>
+<div class="modal" id="modal" hidden role="dialog" aria-modal="true" aria-labelledby="mdTitle">
+  <div class="box">
+    <h3 id="mdTitle"></h3>
+    <p id="mdMsg"></p>
+    <input type="text" id="mdInput" hidden>
+    <textarea id="mdArea" hidden spellcheck="false" style="min-height:150px;font-size:12px"></textarea>
+    <div class="row">
+      <button type="button" class="small" id="mdCancel">Batal</button>
+      <button type="button" class="small" id="mdOk">OK</button>
+    </div>
+  </div>
+</div>
+<div class="tip" id="tip" role="tooltip" hidden></div>
+<div class="picker" id="picker" hidden role="dialog" aria-label="Pilih tanggal">
+  <div class="ph">
+    <button class="icon" type="button" id="pkPrev" aria-label="Bulan sebelumnya"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+    <span class="m" id="pkTitle"></span>
+    <button class="icon" type="button" id="pkNext" aria-label="Bulan berikutnya"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+  </div>
+  <div class="grid" id="pkGrid"></div>
+  <div class="pf"><span class="cur" id="pkCur"></span><button class="small" type="button" id="pkToday">Hari ini</button></div>
+</div>
+
+<script>
+(function(){
+// Bobot hasil kalibrasi pada 302 swing IHSG kurasi (2016-2026, 300 kejadian),
+// validasi silang 5 lipatan blok waktu. Sebaran antar lipatan <=0.10.
+// Bobot bawaan hasil kalibrasi pada 302 swing IHSG kurasi (2016-2026, 300
+// kejadian). Diuji silang 5-lipat acak 20x: menang di 86/100 lipatan atas
+// bobot rata, keunggulan peringkat median 5.3 poin.
+const F_VER=2;
+const F_DEFAULT=[[0.5,1],[0.618,0.5],[0.786,0.8],[1,0.5],[1.272,0.4],[1.5,0.2],[1.618,0.1],[2,0.15],[2.24,0.45],[2.618,0.45]];
+const $=s=>document.querySelector(s);
+const pad=n=>String(n).padStart(2,'0');
+const DOW=['Min','Sen','Sel','Rab','Kam','Jum','Sab'];
+const MON=['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+const ICON={
+  cal:'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
+  del:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+  warn:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5M12 16.5v.5M10.3 3.9 2.6 17.2A2 2 0 0 0 4.3 20h15.4a2 2 0 0 0 1.7-2.8L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>',
+  info:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.5"/></svg>'
+};
+
+// ---------- date helpers (all UTC-midnight to avoid TZ drift) ----------
+function mk(y,m,d){return new Date(Date.UTC(y,m-1,d));}
+function key(dt){return dt.getUTCFullYear()+'-'+pad(dt.getUTCMonth()+1)+'-'+pad(dt.getUTCDate());}
+function fmtShort(dt){return pad(dt.getUTCDate())+'-'+pad(dt.getUTCMonth()+1)+'-'+String(dt.getUTCFullYear()).slice(2);}
+function fmtLong(dt){return DOW[dt.getUTCDay()]+', '+dt.getUTCDate()+' '+MON[dt.getUTCMonth()]+' '+dt.getUTCFullYear();}
+function addDays(dt,n){return new Date(dt.getTime()+n*86400000);}
+function parseDate(s){
+  s=(s||'').trim(); if(!s) return null;
+  let m;
+  if((m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))) return valid(+m[1],+m[2],+m[3]);
+  if((m=s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2}|\d{4})$/))){
+    let y=+m[3]; if(m[3].length===2) y+=2000; return valid(y,+m[2],+m[1]);
+  }
+  return null;
+}
+function valid(y,m,d){const dt=mk(y,m,d);return (dt.getUTCFullYear()===y&&dt.getUTCMonth()===m-1&&dt.getUTCDate()===d)?dt:null;}
+
+// ---------- trading calendar ----------
+let holidaySet=new Set();
+let market='ihsg'; // 'ihsg' | 'global'
+function includeWeekend(){return market==='global'&&$('#wkOn').checked;}
+function isTrading(dt){
+  const w=dt.getUTCDay();
+  if(market==='global') return includeWeekend()||(w!==0&&w!==6);
+  return w!==0&&w!==6&&!holidaySet.has(key(dt));
+}
+function nonTradingReason(dt){return (dt.getUTCDay()%6===0&&!includeWeekend())?'weekend':'libur bursa';}
+function barsBetween(a,b){ // trading days strictly after a, up to and including b
+  let n=0,d=addDays(a,1);
+  while(d<=b){if(isTrading(d))n++;d=addDays(d,1);}
+  return n;
+}
+function addBars(a,n){let d=a,c=0;while(c<n){d=addDays(d,1);if(isTrading(d))c++;}return d;}
+
+// ---------- state / persistence ----------
+const LS='ihsg-swing-cycle-v1';
+function loadState(){
+  try{const s=JSON.parse(localStorage.getItem(LS));if(s&&typeof s==='object')return s;}catch(e){}
+  return null;
+}
+// Profil: satu daftar swing per emiten (IHSG) atau komoditas (Global).
+// Pengaturan skor dan libur bursa TIDAK ikut tersimpan per profil.
+// profiles = {ihsg:[{name,high,low}], global:[...]}, cur = {ihsg:idx, global:idx}
+const profiles={ihsg:[],global:[]};
+const cur={ihsg:0,global:0};
+let dirty=false;
+const swingStore={ihsg:{high:[],low:[]},global:{high:[],low:[]}};
+let fModel=F_DEFAULT.map(([f,w])=>({f,on:true,w}));
+function saveState(){
+  swingStore[market]={high:readSwings('high'),low:readSwings('low')};
+  if(!dirty){const p=curProf();p.high=swingStore[market].high;p.low=swingStore[market].low;}
+  const s={holidays:$('#holidays').value,market,wkOn:$('#wkOn').checked,swings:swingStore,
+    profiles,curProf:cur,
+    fv:F_VER,f:fModel.map(x=>({f:x.f,on:x.on,w:x.w})),
+    tolOn:$('#tolOn').checked,tolW:$('#tolW').value,recency:$('#recency').value,crossOn:$('#crossOn').checked,crossW:$('#crossW').value};
+  const el=$('#savedAt');
+  try{localStorage.setItem(LS,JSON.stringify(s));const t=new Date();el.textContent='Tersimpan '+pad(t.getHours())+':'+pad(t.getMinutes());el.classList.remove('err');}
+  catch(e){el.textContent='Tidak tersimpan';el.classList.add('err');}
+}
+
+// ---------- UI: rasio Fibonacci (chip + bobot) ----------
+function buildF(saved,ver){
+  // Bobot bawaan diperbarui: kalau yang tersimpan berasal dari versi lama DAN
+  // belum pernah diubah sendiri oleh pengguna, pakai bawaan yang baru.
+  if(saved&&saved.length&&ver!==F_VER){
+    const oldDefaults=[[0.5,1],[0.618,1],[0.786,1],[1,1],[1.272,1],[1.5,1],[1.618,1],[2,1],[2.24,0.5],[2.618,0.5],
+                       [0.618,0.75],[1,0.7],[1.272,0.6],[1.5,0.35],[1.618,0.25],[2,0.3]];
+    const untouched=saved.every(sv=>oldDefaults.some(([f,w])=>Math.abs(f-sv.f)<1e-9&&Math.abs(w-(+sv.w))<1e-9));
+    if(untouched)saved=null;
+  }
+  if(saved&&saved.length)fModel=F_DEFAULT.map(([f,w])=>{const sv=saved.find(x=>x.f===f);return {f,on:sv?!!sv.on:true,w:sv&&isFinite(+sv.w)?+sv.w:w};});
+  const c=$('#fchips');c.innerHTML='';const g=$('#fweights');g.innerHTML='';
+  fModel.forEach((x,i)=>{
+    const b=document.createElement('button');b.type='button';b.className='chip toggle';b.id='f-on-'+i;b.setAttribute('aria-pressed',String(x.on));
+    b.innerHTML='× '+x.f+'<span class="w">'+fmt(x.w)+'</span>';
+    b.addEventListener('click',()=>{x.on=!x.on;b.setAttribute('aria-pressed',String(x.on));recalc();});
+    c.append(b);
+    const wrap=document.createElement('div');
+    const lab=document.createElement('label');lab.htmlFor='f-w-'+i;lab.textContent='× '+x.f;
+    const wi=document.createElement('input');wi.type='number';wi.id='f-w-'+i;wi.step='0.1';wi.min='0';wi.value=x.w;wi.setAttribute('aria-label','Bobot rasio '+x.f);
+    wi.addEventListener('input',()=>{x.w=+wi.value||0;b.querySelector('.w').textContent=fmt(x.w);recalcSoon();});
+    wrap.append(lab,wi);g.append(wrap);
+  });
+}
+
+// ---------- UI: swing rows ----------
+let rowSeq=0;
+function autoFormat(v){
+  if(!/^[\d-]*$/.test(v))return v;           // format lain (yyyy-mm-dd, garis miring) dibiarkan
+  if(/^\d{4}-/.test(v))return v;             // yyyy-mm-dd sedang diketik
+  const d=v.replace(/\D/g,'').slice(0,8);
+  if(d.length<=2)return d;
+  if(d.length<=4)return d.slice(0,2)+'-'+d.slice(2);
+  return d.slice(0,2)+'-'+d.slice(2,4)+'-'+d.slice(4);
+}
+function addRow(kind,val,focus){
+  const list=$('#list-'+kind);const idx=rowSeq++;
+  const item=(val&&typeof val==='object')?val:{v:val||'',on:true};
+  const row=document.createElement('div');row.className='swing-row'+(item.on?'':' off');
+  const t=document.createElement('input');t.type='text';t.inputMode='numeric';t.placeholder='DD-MM-YY';t.id=kind+'-t-'+idx;t.value=item.v||'';t.autocomplete='off';
+  const d=document.createElement('button');d.type='button';d.className='icon cal';d.id=kind+'-d-'+idx;d.setAttribute('aria-label','Buka kalender');d.innerHTML=ICON.cal;
+  const cl=document.createElement('label');cl.className='chk';cl.title='Ikut dihitung';
+  const c=document.createElement('input');c.type='checkbox';c.id=kind+'-c-'+idx;c.checked=item.on!==false;c.setAttribute('aria-label','Ikut dihitung');
+  cl.append(c);
+  const x=document.createElement('button');x.className='icon';x.type='button';x.setAttribute('aria-label','Hapus tanggal');x.innerHTML=ICON.del;
+  t.addEventListener('input',()=>{const f=autoFormat(t.value);if(f!==t.value)t.value=f;markDirty();recalcSoon();});
+  t.addEventListener('change',recalc);
+  t.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();if(!t.value.trim())return;const next=row.nextElementSibling;if(next)next.querySelector('input[type=text]').focus();else addRow(kind,'',true);}
+  });
+  c.addEventListener('change',()=>{row.classList.toggle('off',!c.checked);markDirty();recalc();});
+  d.addEventListener('click',()=>openPicker(t,d));
+  x.addEventListener('click',()=>{row.remove();if(!list.children.length)addRow(kind,'');markDirty();recalc();});
+  row.append(t,d,cl,x);list.append(row);
+  if(focus)t.focus();
+}
+function readSwings(kind){return [...document.querySelectorAll('#list-'+kind+' .swing-row')].map(r=>({v:r.querySelector('input[type=text]').value,on:r.querySelector('input[type=checkbox]').checked}));}
+function normSwings(arr){return (arr||[]).map(v=>typeof v==='string'?{v,on:true}:{v:v.v||'',on:v.on!==false});}
+
+// ---------- holidays ----------
+function parseHolidays(){
+  holidaySet=new Set();let bad=[];
+  $('#holidays').value.split(/\n/).forEach(l=>{l=l.trim();if(!l||l.startsWith('#'))return;const p=parseDate(l.split(/\s+/)[0]);if(p)holidaySet.add(key(p));else bad.push(l);});
+  const ks=[...holidaySet].sort();
+  $('#holStat').textContent=ks.length?ks.length+' hari libur tercatat, terakhir '+fmtShort(parseDate(ks[ks.length-1]))+(bad.length?' — '+bad.length+' baris tidak dikenali: '+bad.slice(0,3).join(', '):''):'Belum ada hari libur.';
+}
+
+// ---------- core calculation (tidak diubah) ----------
+function msgBox(cls,html){return '<div class="msg '+cls+'">'+(cls==='err'?ICON.warn:ICON.info)+'<div>'+html+'</div></div>';}
+function computeSeries(kind){
+  const raw=readSwings(kind);const inputs=[...document.querySelectorAll('#list-'+kind+' input[type=text]')];
+  const msg=$('#msg-'+kind);const intBox=$('#int-'+kind);msg.innerHTML='';intBox.innerHTML='';
+  inputs.forEach(i=>i.classList.remove('bad'));
+  const errs=[];const dates=[];const seen=new Map();
+  raw.forEach(({v:s,on},i)=>{
+    if(!s.trim()||!on)return;
+    const p=parseDate(s);
+    if(!p){errs.push('Baris '+(i+1)+': format tanggal tidak dikenali ("'+s+'").');inputs[i].classList.add('bad');return;}
+    if(!isTrading(p)){errs.push('Baris '+(i+1)+': '+fmtLong(p)+' bukan hari bursa ('+nonTradingReason(p)+').');inputs[i].classList.add('bad');return;}
+    const k=key(p);
+    if(seen.has(k)){errs.push('Baris '+(i+1)+': '+fmtShort(p)+' sudah ada di baris '+(seen.get(k)+1)+'.');inputs[i].classList.add('bad');return;}
+    seen.set(k,i);dates.push({p,i});
+  });
+  dates.sort((a,b)=>a.p-b.p);
+  if(errs.length){msg.innerHTML=msgBox('err',errs.map(e=>esc(e)).join('<br>'));return null;}
+  if(!dates.length)return null;
+  if(dates.length<2)msg.innerHTML=msgBox('info','Butuh minimal 2 tanggal aktif untuk menghitung interval.');
+  const intervals=[];
+  for(let k=1;k<dates.length;k++){
+    const d=barsBetween(dates[k-1].p,dates[k].p);
+    if(d<2){errs.push('Jarak '+fmtShort(dates[k-1].p)+' → '+fmtShort(dates[k].p)+' hanya '+d+' bar. Dua swing sejenis tidak mungkin berjarak kurang dari 2 bar.');inputs[dates[k].i].classList.add('bad');}
+    intervals.push({from:dates[k-1].p,to:dates[k].p,d});
+  }
+  if(errs.length){msg.innerHTML=msgBox('err',errs.map(e=>esc(e)).join('<br>'));return null;}
+  intBox.innerHTML=intervals.map(iv=>'<span class="chip">'+fmtShort(iv.from)+' → '+fmtShort(iv.to)+' = '+iv.d+' bar</span>').join('');
+  return {last:dates[dates.length-1].p,intervals};
+}
+
+// Jarak silang: dari swing low terakhir ke swing high terakhir (atau sebaliknya),
+// diproyeksikan dari swing yang paling akhir untuk mencari swing tipe lawannya.
+function computeCross(sH,sL){
+  if(!$('#crossOn').checked||!sH||!sL)return null;
+  const w=+$('#crossW').value;if(!(w>0))return null;
+  if(sH.last.getTime()===sL.last.getTime())return null;
+  const highLater=sH.last>sL.last;
+  const from=highLater?sL.last:sH.last,to=highLater?sH.last:sL.last;
+  const d=barsBetween(from,to);if(d<1)return null;
+  return {from,to,d,origin:to,target:highLater?'low':'high',label:highLater?'L→H':'H→L',w};
+}
+
+function project(series,cross,anchor){
+  const fs=fModel.filter(x=>x.on).map(x=>({f:x.f,w:x.w||0}));
+  const tolOn=$('#tolOn').checked;const tolW=+$('#tolW').value;const rec=+$('#recency').value;
+  const offsets=tolOn?[[0,1],[-1,tolW],[1,tolW]]:[[0,1]];
+  // Acuan bersama: tanggal swing paling akhir dari SELURUH input, high maupun
+  // low. Kedua tabel mulai dari tanggal yang sama, supaya bisa dibandingkan
+  // berdampingan. Proyeksi tetap dihitung dari titik asalnya masing-masing;
+  // yang dibatasi hanya apa yang ditampilkan. Tanggal lampau ditandai, bukan
+  // disembunyikan, supaya hasilnya bisa dipakai untuk backtest.
+  const t0=anchor||series.last;
+  const n=series.intervals.length;
+  const hits=new Map(); // key -> {dt, score, items[]}
+  const caches=new Map();
+  const barAt=(origin,b)=>{const ok=key(origin);if(!caches.has(ok))caches.set(ok,new Map());const c=caches.get(ok);if(!c.has(b))c.set(b,addBars(origin,b));return c.get(b);};
+  function addInterval(iv,origin,mult,extra){
+    // Saat jaraknya pendek, beberapa rasio membulat ke bar yang sama —
+    // misalnya d=3 bar: 0.5, 0.618 dan 0.786 ketiganya jadi 2 bar. Itu
+    // artefak pembulatan, bukan bukti tambahan, jadi dulu skornya
+    // menggelembung. Aturannya kini: DI DALAM satu interval, tiap bar hanya
+    // mendapat nilai poin TERTINGGI di antara rasio yang menunjuk bar itu.
+    // Antar interval yang berbeda poinnya tetap dijumlahkan, karena itu
+    // memang dua bukti terpisah.
+    const byBar=new Map();
+    fs.forEach(({f,w})=>{
+      const bars=Math.round(iv.d*f);if(bars<1)return;
+      offsets.forEach(([off,tw])=>{
+        const b=bars+off;if(b<1)return;
+        const dt=barAt(origin,b);if(dt<=t0)return;
+        const pts=w*mult*tw;if(pts<=0)return;
+        const k=key(dt);
+        if(!byBar.has(k))byBar.set(k,{dt,cands:[]});
+        byBar.get(k).cands.push(Object.assign({d:iv.d,from:iv.from,to:iv.to,f,bars,off,pts},extra));
+      });
+    });
+    byBar.forEach(({dt,cands})=>{
+      // pemenang: poin tertinggi; seri -> hit tepat lebih diutamakan daripada
+      // hit +-1, lalu rasio yang nilai sebelum pembulatannya paling dekat.
+      cands.sort((a,b)=>b.pts-a.pts || Math.abs(a.off)-Math.abs(b.off)
+        || Math.abs(iv.d*a.f-a.bars)-Math.abs(iv.d*b.f-b.bars));
+      const k=key(dt);if(!hits.has(k))hits.set(k,{dt,score:0,items:[]});
+      const h=hits.get(k);h.score+=cands[0].pts;
+      cands.forEach((c,i)=>{c.lost=i>0;h.items.push(c);});
+    });
+  }
+  // Tiap interval diproyeksikan dari ujung KEDUANYA sendiri (iv.to), bukan
+  // dari swing terakhir. Jarak A→B dikali F adalah jarak B→C, jadi titik
+  // tolaknya B. Interval lama tetap bisa menyumbang proyeksi ke masa depan
+  // lewat pengali besar; yang landing di masa yang sudah diketahui tersaring
+  // sendiri oleh acuan t0.
+  series.intervals.forEach((iv,idx)=>addInterval(iv,iv.to,Math.pow(rec,n-1-idx),{}));
+  if(cross)addInterval(cross,cross.origin,cross.w,{cross:cross.label}); // jarak silang = interval terbaru, bobot penuh × pengali silang
+  return [...hits.values()].sort((a,b)=>a.dt-b.dt);
+}
+
+// ---------- results ----------
+const openDetails=new Set(); // key tanggal+kind yang sedang dibuka
+function renderTable(kind,rows,series,cross,anchor){
+  const box=$('#res-'+kind);const st=$('#stat-'+kind);
+  if(!rows){box.innerHTML='<div class="empty">Isi tanggal swing '+kind+' untuk melihat proyeksi.</div>';st.textContent='';return;}
+  if(!rows.length){box.innerHTML='<div class="empty">Semua proyeksi dari input ini sudah lewat.</div>';st.textContent='';return;}
+  const max=Math.max(...rows.map(r=>r.score));
+  const sorted=[...rows].sort((a,b)=>b.score-a.score);const rank=new Map();sorted.slice(0,3).forEach((r,i)=>rank.set(key(r.dt),i+1));
+  const nI=series.intervals.length;
+  const nPast=rows.filter(r=>r.dt<todayUTC()).length;
+  st.textContent=(nI?nI+' interval '+kind+'-ke-'+kind:'Tanpa interval sejenis')+(cross?' + jarak silang '+cross.label+' '+cross.d+' bar':'')+' · acuan '+fmtShort(anchor||series.last)+(anchor&&anchor.getTime()!==series.last.getTime()?' (swing '+kind+' terakhir '+fmtShort(series.last)+')':'')+' · '+rows.length+' tanggal kandidat'+(nPast?' ('+nPast+' sudah lewat)':'')+', skor tertinggi '+fmt(max);
+  const tod=todayUTC();let nlDone=false;
+  let h='<table><thead><tr><th>Tanggal</th><th title="Jumlah bar dari swing terakhir">Bar</th><th>Skor</th></tr></thead><tbody>';
+  rows.forEach(r=>{
+    const bars=barsBetween(series.last,r.dt);
+    const k=kind+':'+key(r.dt);const open=openDetails.has(k);
+    const rk=rank.get(key(r.dt));
+    const past=r.dt<tod;
+    if(!past&&!nlDone){nlDone=true;if(rows[0].dt<tod)h+='<tr class="nowline"><td colspan="3"><div class="nl">hari ini</div></td></tr>';}
+    const det=r.items.map(it=>'<span class="'+(it.lost?'lost':'')+'">'
+      +(it.cross?'<span class="cx">'+it.cross+'</span> ':'')
+      +it.d+' bar ('+fmtShort(it.from)+'→'+fmtShort(it.to)+') × '+it.f+' = '+it.bars+' bar'
+      +(it.off?', ±1':', tepat')+' &nbsp;'
+      +(it.lost?'lebur, tidak dihitung':'+'+fmt(it.pts)+' poin')+'</span>').join('<br>');
+    h+='<tr class="hit'+(past?' past':'')+'" tabindex="0" role="button" aria-expanded="'+open+'" data-k="'+esc(k)+'"><td class="mono">'+fmtShort(r.dt)+'<span class="dow">'+DOW[r.dt.getUTCDay()]+', '+r.dt.getUTCDate()+' '+MON[r.dt.getUTCMonth()]+'</span></td>'+
+       '<td class="mono">'+bars+'</td>'+
+       '<td class="score"><div class="meter"><span class="bar" style="width:'+Math.max(2,Math.round(r.score/max*64))+'px"></span><span class="mono">'+fmt(r.score)+'</span>'+(rk?'<span class="rank">#'+rk+'</span>':'')+'<span class="hint" style="margin:0">'+r.items.filter(x=>!x.lost).length+' hit</span></div></td></tr>'+
+       '<tr class="detail"'+(open?'':' hidden')+'><td colspan="3">'+det+'</td></tr>';
+  });
+  box.innerHTML=h+'</tbody></table>';
+}
+function toggleDetail(tr){
+  const k=tr.dataset.k;const det=tr.nextElementSibling;const open=!openDetails.has(k);
+  if(open)openDetails.add(k);else openDetails.delete(k);
+  tr.setAttribute('aria-expanded',String(open));det.hidden=!open;
+}
+document.addEventListener('click',e=>{const tr=e.target.closest('tr.hit');if(tr)toggleDetail(tr);});
+document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('tr.hit')){e.preventDefault();toggleDetail(e.target);}});
+function fmt(x){return (Math.round(x*100)/100).toString();}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+function applyMarketUI(){
+  const g=market==='global';
+  $('#mkIhsg').setAttribute('aria-checked',String(!g));$('#mkGlobal').setAttribute('aria-checked',String(g));
+  $('#panelHolidays').hidden=g;$('#panelWeekend').hidden=!g;
+  $('#subIhsg').hidden=g;$('#subGlobal').hidden=!g;
+  $('#ob1').textContent=g?'Pilih apakah weekend ikut dihitung sebagai bar di panel Kalender pasar (On untuk crypto).':'Tempel daftar libur BEI di panel Libur bursa; weekend sudah dikecualikan otomatis.';
+  document.title="Time Geometry Calculator · "+(g?"Global":"IHSG");
+}
+function fillRows(kind,vals){const l=$('#list-'+kind);l.innerHTML='';(vals||[]).forEach(v=>addRow(kind,v));if(!l.children.length)addRow(kind,'');}
+function switchMarket(m){
+  if(m===market)return;
+  stash();
+  market=m;applyMarketUI();
+  loadProfileIntoForm();
+  closePicker();recalc();
+}
+
+// ---------- profil ----------
+function defName(m){return m==='ihsg'?'Emiten baru':'Komoditas baru';}
+function curProf(){const a=profiles[market];if(!a.length)a.push({name:defName(market),high:normSwings(['','','']),low:normSwings(['','',''])});
+  if(cur[market]>=a.length||cur[market]<0)cur[market]=0;return a[cur[market]];}
+function stash(){ // salin isi form ke profil yang sedang aktif
+  const p=curProf();p.high=readSwings('high');p.low=readSwings('low');
+  swingStore[market]={high:p.high,low:p.low};
+}
+function loadProfileIntoForm(){
+  const p=curProf();
+  fillRows('high',p.high);fillRows('low',p.low);
+  swingStore[market]={high:p.high,low:p.low};
+  dirty=false;renderProfiles();
+}
+function renderProfiles(){
+  const sel=$('#profSel');sel.innerHTML='';
+  profiles[market].forEach((p,i)=>{
+    const o=document.createElement('option');o.value=i;o.textContent=p.name;
+    if(i===cur[market])o.selected=true;sel.append(o);
+  });
+  const o=document.createElement('option');o.value='__new';o.textContent='+ Profil baru…';sel.append(o);
+  $('#profTitle').textContent=market==='ihsg'?'Emiten':'Komoditas';
+  // hitung dari isi form supaya angkanya mengikuti apa yang terlihat
+  const p=curProf();
+  const live=!!$('#list-high').children.length;
+  const hs=live?readSwings('high'):(p.high||[]), ls=live?readSwings('low'):(p.low||[]);
+  const nH=hs.filter(x=>x.v&&x.v.trim()).length;
+  const nL=ls.filter(x=>x.v&&x.v.trim()).length;
+  const h=$('#profHint');
+  h.textContent=(dirty?'Ada perubahan belum disimpan · ':'')+nH+' swing high, '+nL+' swing low'
+    +' · '+profiles[market].length+' profil tersimpan';
+  h.classList.toggle('prof-dirty',dirty);
+  $('#profDelete').disabled=profiles[market].length<=1;
+}
+function markDirty(){dirty=true;renderProfiles();}
+
+// dialog sendiri: prompt()/confirm() diblokir di halaman artifact
+let mdResolve=null;
+function ask(title,msg,defVal){
+  return new Promise(res=>{
+    mdResolve=res;
+    $('#mdTitle').textContent=title;$('#mdMsg').textContent=msg||'';$('#mdMsg').hidden=!msg;
+    const inp=$('#mdInput');
+    if(defVal===undefined){inp.hidden=true;}
+    else{inp.hidden=false;inp.value=defVal;}
+    $('#modal').hidden=false;
+    if(defVal!==undefined)setTimeout(()=>{inp.focus();inp.select();},30);else setTimeout(()=>$('#mdOk').focus(),30);
+  });
+}
+function closeModal(v){$('#modal').hidden=true;$('#mdArea').hidden=true;const r=mdResolve;mdResolve=null;if(r)r(v);}
+function showText(title,msg,text){
+  return new Promise(res=>{
+    mdResolve=res;
+    $('#mdTitle').textContent=title;$('#mdMsg').textContent=msg;$('#mdMsg').hidden=false;
+    $('#mdInput').hidden=true;
+    const ta=$('#mdArea');ta.hidden=false;ta.value=text;
+    $('#modal').hidden=false;
+    setTimeout(()=>{ta.focus();ta.select();},30);
+  });
+}
+function uniqueName(m,name,skipIdx){
+  let n=name.trim()||defName(m),i=2;
+  while(profiles[m].some((p,k)=>k!==skipIdx&&p.name.toLowerCase()===n.toLowerCase()))n=name.trim()+' ('+(i++)+')';
+  return n;
+}
+let recalcTimer=null;
+function recalcSoon(){clearTimeout(recalcTimer);recalcTimer=setTimeout(recalc,250);}
+function recalc(){
+  clearTimeout(recalcTimer);
+  parseHolidays();
+  const sH=computeSeries('high'),sL=computeSeries('low');
+  const cross=computeCross(sH,sL);
+  if(cross){
+    const box=$('#int-'+cross.target);
+    box.insertAdjacentHTML('beforeend','<span class="chip cross" title="Jarak silang, diproyeksikan dari '+fmtShort(cross.origin)+'">'+cross.label+' '+fmtShort(cross.from)+' → '+fmtShort(cross.to)+' = '+cross.d+' bar</span>');
+  }
+  const fresh=!sH&&!sL;
+  $('#onboard').hidden=!fresh;$('#results').hidden=fresh;
+  // Acuan bersama = swing paling akhir dari seluruh input, high maupun low.
+  let anchor=null;
+  if(sH&&sL)anchor=sH.last>sL.last?sH.last:sL.last;
+  else if(sH)anchor=sH.last; else if(sL)anchor=sL.last;
+  const cH=cross&&cross.target==='high'?cross:null, cL=cross&&cross.target==='low'?cross:null;
+  renderTable('high',sH?project(sH,cH,anchor):null,sH,cH,anchor);
+  renderTable('low',sL?project(sL,cL,anchor):null,sL,cL,anchor);
+  saveState();
+}
+
+// ---------- custom date picker (dd-mm-yyyy, hari bursa saja) ----------
+const pk=$('#picker');let pkTarget=null,pkY=0,pkM=0; // pkM: 1..12
+const MONL=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+function fmtFull(dt){return pad(dt.getUTCDate())+'-'+pad(dt.getUTCMonth()+1)+'-'+dt.getUTCFullYear();}
+function todayUTC(){const t=new Date();return mk(t.getFullYear(),t.getMonth()+1,t.getDate());}
+function placeBelow(el,anchor){
+  const r=anchor.getBoundingClientRect();
+  let left=r.left+window.scrollX,top=r.bottom+window.scrollY+6;
+  const vw=document.documentElement.clientWidth;
+  if(left+el.offsetWidth>window.scrollX+vw-8)left=Math.max(8+window.scrollX,window.scrollX+vw-el.offsetWidth-8);
+  if(r.bottom+el.offsetHeight+6>window.innerHeight&&r.top-el.offsetHeight-6>0)top=r.top+window.scrollY-el.offsetHeight-6;
+  el.style.left=left+'px';el.style.top=top+'px';
+}
+function openPicker(input,anchor){
+  parseHolidays();hidePop();
+  pkTarget=input;
+  const cur=parseDate(input.value)||todayUTC();
+  pkY=cur.getUTCFullYear();pkM=cur.getUTCMonth()+1;
+  renderPicker();
+  pk.hidden=false;placeBelow(pk,anchor);
+}
+function closePicker(){pk.hidden=true;pkTarget=null;}
+function renderPicker(){
+  $('#pkTitle').textContent=MONL[pkM-1]+' '+pkY;
+  const sel=pkTarget?parseDate(pkTarget.value):null;const selK=sel?key(sel):'';const todK=key(todayUTC());
+  $('#pkCur').textContent=sel?fmtFull(sel):'belum dipilih';
+  const g=$('#pkGrid');g.innerHTML='';
+  ['Min','Sen','Sel','Rab','Kam','Jum','Sab'].forEach(h=>{const e=document.createElement('div');e.className='dh';e.textContent=h;g.append(e);});
+  const first=mk(pkY,pkM,1);const lead=first.getUTCDay(); // Sunday-first (Min … Sab)
+  let d=addDays(first,-lead);
+  for(let i=0;i<42;i++){
+    const b=document.createElement('button');b.type='button';b.className='d';b.textContent=d.getUTCDate();
+    const inMonth=d.getUTCMonth()+1===pkM;const k=key(d);const trading=isTrading(d);
+    if(!inMonth)b.classList.add('other');
+    if(!trading){b.classList.add('off');b.disabled=true;b.title=nonTradingReason(d)==='weekend'?'Weekend':'Libur bursa';}
+    if(k===selK)b.classList.add('sel');
+    if(k===todK)b.classList.add('today');
+    b.title=b.title||fmtFull(d);
+    const dt=d;
+    b.addEventListener('click',()=>{if(pkTarget){pkTarget.value=fmtShort(dt);closePicker();recalc();}});
+    g.append(b);d=addDays(d,1);
+    if(i===34&&d.getUTCMonth()+1!==pkM)break; // stop at 5 rows when the 6th is all next-month
+  }
+}
+$('#pkPrev').addEventListener('click',()=>{pkM--;if(pkM<1){pkM=12;pkY--;}renderPicker();});
+$('#pkNext').addEventListener('click',()=>{pkM++;if(pkM>12){pkM=1;pkY++;}renderPicker();});
+$('#pkToday').addEventListener('click',()=>{const t=todayUTC();pkY=t.getUTCFullYear();pkM=t.getUTCMonth()+1;renderPicker();});
+document.addEventListener('click',e=>{if(pk.hidden)return;if(e.target.closest('#picker')||e.target.closest('.cal'))return;closePicker();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(!pk.hidden)closePicker();hidePop();}});
+
+// ---------- popover keterangan: hover di desktop, ketuk di layar sentuh ----------
+const tip=$('#tip');let popAnchor=null,popPinned=false;
+const canHover=window.matchMedia('(hover:hover)').matches;
+function showPop(el,pinned){
+  if(popAnchor&&popAnchor!==el)popAnchor.setAttribute('aria-expanded','false');
+  popAnchor=el;popPinned=pinned;
+  tip.textContent=el.dataset.tip;tip.hidden=false;placeBelow(tip,el);
+  el.setAttribute('aria-expanded','true');
+}
+function hidePop(){if(!popAnchor)return;popAnchor.setAttribute('aria-expanded','false');popAnchor=null;popPinned=false;tip.hidden=true;}
+document.addEventListener('click',e=>{
+  const el=e.target.closest('.info');
+  if(el){e.preventDefault();e.stopPropagation();if(popAnchor===el&&popPinned)hidePop();else showPop(el,true);return;}
+  if(!e.target.closest('#tip'))hidePop();
+},true);
+if(canHover){
+  document.addEventListener('mouseover',e=>{const el=e.target.closest('.info');if(el&&!(popPinned))showPop(el,false);});
+  document.addEventListener('mouseout',e=>{const el=e.target.closest('.info');if(el&&popAnchor===el&&!popPinned)hidePop();});
+}
+window.addEventListener('resize',()=>{hidePop();closePicker();});
+
+// ---------- tab (layar sempit / pendek) ----------
+const app=$('#app');
+function setTab(t){app.dataset.tab=t;document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.tab===t)));hidePop();closePicker();window.scrollTo({top:0});}
+document.querySelectorAll('#tabs button').forEach(b=>b.addEventListener('click',()=>setTab(b.dataset.tab)));
+
+// ---------- tema (hanya versi file mandiri) ----------
+const TK='tgc-theme';
+function applyTheme(v){const r=document.documentElement;if(v==='dark'||v==='light')r.dataset.theme=v;else delete r.dataset.theme;$('#themeBtn').textContent='Tema: '+(v==='dark'?'Gelap':v==='light'?'Terang':'Auto');}
+if(document.documentElement.hasAttribute('data-standalone')){
+  let tv='auto';try{tv=localStorage.getItem(TK)||'auto';}catch(e){}
+  applyTheme(tv);
+  $('#themeBtn').addEventListener('click',()=>{tv=tv==='auto'?'dark':tv==='dark'?'light':'auto';try{localStorage.setItem(TK,tv);}catch(e){}applyTheme(tv);});
+}
+
+// ---------- init ----------
+const saved=loadState();
+buildF(saved&&saved.f,saved&&saved.fv);
+if(saved){
+  $('#holidays').value=saved.holidays||'';
+  if(saved.profiles&&(saved.profiles.ihsg||saved.profiles.global)){
+    ['ihsg','global'].forEach(m=>{
+      (saved.profiles[m]||[]).forEach(p=>profiles[m].push(
+        {name:String(p.name||defName(m)),high:normSwings(p.high),low:normSwings(p.low)}));
+    });
+    if(saved.curProf){['ihsg','global'].forEach(m=>{if(isFinite(+saved.curProf[m]))cur[m]=+saved.curProf[m];});}
+  }else{ // format lama: satu daftar per pasar -> jadikan satu profil
+    const old={ihsg:{high:[],low:[]},global:{high:[],low:[]}};
+    if(saved.swings){['ihsg','global'].forEach(m=>{if(saved.swings[m])old[m]={high:normSwings(saved.swings[m].high),low:normSwings(saved.swings[m].low)};});}
+    else{old.ihsg={high:normSwings(saved.high),low:normSwings(saved.low)};}
+    ['ihsg','global'].forEach(m=>{
+      if((old[m].high||[]).length||(old[m].low||[]).length)
+        profiles[m].push({name:m==='ihsg'?'IHSG':'Global',high:old[m].high,low:old[m].low});
+    });
+  }
+  if(saved.market==='global')market='global';
+  $('#wkOn').checked=!!saved.wkOn;
+  if(saved.tolW)$('#tolW').value=saved.tolW;if(saved.recency)$('#recency').value=saved.recency;
+  if(typeof saved.tolOn==='boolean')$('#tolOn').checked=saved.tolOn;
+  if(typeof saved.crossOn==='boolean')$('#crossOn').checked=saved.crossOn;
+  if(saved.crossW!==undefined&&saved.crossW!=='')$('#crossW').value=saved.crossW;
+}else{
+  $('#holidays').value='# Contoh — hanya libur tanggal tetap yang pasti. Lengkapi dengan libur/cuti bersama lain dari BEI.\n01-01-26\n17-08-26\n25-12-26\n01-01-27';
+  swingStore.ihsg={high:normSwings(['','','']),low:normSwings(['','',''])};
+}
+applyMarketUI();
+loadProfileIntoForm();
+document.querySelectorAll('.segbtn').forEach(b=>b.addEventListener('click',()=>switchMarket(b.dataset.market)));
+
+// ---------- tombol profil ----------
+$('#modal').addEventListener('click',e=>{if(e.target.id==='modal')closeModal(null);});
+$('#mdCancel').addEventListener('click',()=>closeModal(null));
+$('#mdOk').addEventListener('click',()=>closeModal($('#mdInput').hidden?true:$('#mdInput').value));
+$('#mdInput').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();closeModal($('#mdInput').value);}});
+
+$('#profSel').addEventListener('change',async e=>{
+  const v=e.target.value;
+  if(v==='__new'){
+    e.target.value=String(cur[market]);
+    const nm=await ask('Profil baru','Nama '+(market==='ihsg'?'emiten':'komoditas')+':',market==='ihsg'?'BBCA':'Gold');
+    if(nm===null)return;
+    stash();
+    profiles[market].push({name:uniqueName(market,nm,-1),high:normSwings(['','','']),low:normSwings(['','',''])});
+    cur[market]=profiles[market].length-1;
+    loadProfileIntoForm();recalc();
+    return;
+  }
+  const next=+v;
+  if(next===cur[market])return;
+  if(dirty){
+    const ok=await ask('Simpan perubahan?','Profil "'+curProf().name+'" punya perubahan yang belum disimpan. Simpan dulu sebelum pindah?');
+    if(ok===null){e.target.value=String(cur[market]);return;}
+    stash();
+  }
+  cur[market]=next;loadProfileIntoForm();recalc();
+});
+$('#profSave').addEventListener('click',()=>{stash();dirty=false;renderProfiles();saveState();});
+$('#profSaveAs').addEventListener('click',async()=>{
+  const nm=await ask('Simpan sebagai','Nama profil baru:',curProf().name+' (salinan)');
+  if(nm===null)return;
+  const h=readSwings('high'),l=readSwings('low');
+  profiles[market].push({name:uniqueName(market,nm,-1),high:h,low:l});
+  cur[market]=profiles[market].length-1;
+  loadProfileIntoForm();recalc();
+});
+$('#profRename').addEventListener('click',async()=>{
+  const nm=await ask('Ganti nama','Nama baru:',curProf().name);
+  if(nm===null||!nm.trim())return;
+  curProf().name=uniqueName(market,nm,cur[market]);
+  renderProfiles();saveState();
+});
+$('#profDelete').addEventListener('click',async()=>{
+  if(profiles[market].length<=1)return;
+  const nm=curProf().name;
+  const ok=await ask('Hapus profil?','Profil "'+nm+'" beserta seluruh tanggal swingnya akan dihapus. Tindakan ini tidak bisa dibatalkan.');
+  if(ok===null)return;
+  profiles[market].splice(cur[market],1);
+  if(cur[market]>=profiles[market].length)cur[market]=profiles[market].length-1;
+  loadProfileIntoForm();recalc();
+});
+$('#profExport').addEventListener('click',async()=>{
+  stash();
+  const txt=JSON.stringify({app:'time-geometry-calculator',v:1,profiles});
+  const n=profiles.ihsg.length+profiles.global.length;
+  // Unduhan diblokir di halaman artifact, jadi cara utamanya adalah salin teks.
+  await showText('Ekspor '+n+' profil',
+    'Salin seluruh teks di bawah dan simpan sebagai file .json, atau tempel langsung di kotak Impor pada perangkat lain.',txt);
+});
+$('#profImport').addEventListener('click',async()=>{
+  const txt=await ask('Impor profil','Tempel teks hasil ekspor di sini, atau pilih file.','');
+  if(txt===null)return;
+  if(!txt.trim()){$('#profFile').click();return;}
+  applyImport(txt);
+});
+$('#profFile').addEventListener('change',async e=>{
+  const f=e.target.files&&e.target.files[0];e.target.value='';
+  if(f)applyImport(await f.text());
+});
+async function applyImport(txt){
+  let d;
+  try{d=JSON.parse(txt);}catch(err){await ask('Gagal membaca','Teks itu bukan JSON yang bisa dibaca.');return;}
+  if(!d||!d.profiles){await ask('Gagal membaca','Teks itu tidak berisi profil.');return;}
+  let add=0,repl=0,jump=null;
+  ['ihsg','global'].forEach(m=>{
+    // buang profil bawaan yang masih kosong supaya tidak menumpuk
+    if(profiles[m].length===1){
+      const q=profiles[m][0];
+      const kosong=!(q.high||[]).some(x=>x.v&&x.v.trim())&&!(q.low||[]).some(x=>x.v&&x.v.trim());
+      if(kosong&&(d.profiles[m]||[]).length)profiles[m].length=0;
+    }
+    (d.profiles[m]||[]).forEach(p=>{
+      if(!p||!p.name)return;
+      const rec={name:String(p.name),high:normSwings(p.high),low:normSwings(p.low)};
+      const i=profiles[m].findIndex(x=>x.name.toLowerCase()===rec.name.toLowerCase());
+      if(i>=0){profiles[m][i]=rec;repl++;if(m===market&&jump===null)jump=i;}
+      else{profiles[m].push(rec);add++;if(m===market&&jump===null)jump=profiles[m].length-1;}
+    });
+  });
+  if(jump!==null)cur[market]=jump;   // langsung tampilkan profil pertama yang masuk
+  loadProfileIntoForm();recalc();saveState();
+  await ask('Impor selesai',add+' profil ditambahkan, '+repl+' diperbarui.');
+}
+$('#wkOn').addEventListener('change',recalc);
+document.querySelectorAll('[data-add]').forEach(b=>b.addEventListener('click',()=>{addRow(b.dataset.add,'',true);markDirty();}));
+$('#holidays').addEventListener('input',recalcSoon);
+$('#tolW').addEventListener('change',recalc);$('#recency').addEventListener('change',recalc);
+$('#crossOn').addEventListener('change',()=>{$('#crossW').disabled=!$('#crossOn').checked;recalc();});
+$('#crossW').disabled=!$('#crossOn').checked;
+$('#crossW').addEventListener('input',recalcSoon);
+function syncTol(){$('#tolW').disabled=!$('#tolOn').checked;}
+$('#tolOn').addEventListener('change',()=>{syncTol();recalc();});syncTol();
+
+// ---------- ChronoGaze: swing dari chart ----------
+// ChronoGaze menyisipkan window.CHRONOGAZE_SWINGS = {name, market, high:[DD-MM-YY], low:[...]}
+// sebelum skrip ini jalan. Isinya ditulis ke profil bernama `name` (dibuat
+// bila belum ada, ditimpa bila sudah ada), lalu profil itu dibuka. Profil lain
+// tidak disentuh.
+(function(){
+  const SG=window.CHRONOGAZE_SWINGS;
+  if(!SG||!SG.name)return;
+  const m=SG.market==='global'?'global':'ihsg';
+  stash();
+  if(m!==market){market=m;applyMarketUI();}
+  const a=profiles[m];
+  if(a.length===1){ // buang profil bawaan yang masih kosong
+    const q=a[0];
+    if(!(q.high||[]).some(x=>x.v&&x.v.trim())&&!(q.low||[]).some(x=>x.v&&x.v.trim()))a.length=0;
+  }
+  const rec={name:String(SG.name),high:normSwings(SG.high||[]),low:normSwings(SG.low||[])};
+  const i=a.findIndex(x=>x.name.toLowerCase()===rec.name.toLowerCase());
+  if(i>=0)a[i]=rec;else a.push(rec);
+  cur[m]=i>=0?i:a.length-1;
+  loadProfileIntoForm();saveState();
+})();
+
+recalc();
+})();
+</script>
+
+
+
+</body></html>
