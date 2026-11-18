@@ -1,0 +1,11 @@
+# Python environment and tool caches
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Generated per load; rebuilt automatically
+cache/
+
+# Your own price CSVs stay on this computer (upload them in the app instead)
+data/*.csv
