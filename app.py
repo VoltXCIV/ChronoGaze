@@ -118,6 +118,10 @@ function decorate(){
     const html = m && (m[2] in MON) ? cellFor(+m[3], MON[m[2]], +m[1]) : '—';
     tr.cells[1].insertAdjacentHTML('afterend', `<td class="l sg-col">${html}</td>`);
   });
+  // column order: ... Swing | Planet A | Aspect | Planet B ... (the page puts Aspect first)
+  tbl.querySelectorAll('tr').forEach(tr => {
+    if(tr.cells.length > 4) tr.insertBefore(tr.cells[4], tr.cells[3]);
+  });
 }
 new MutationObserver(decorate).observe(tbl, {childList:true});
 decorate();
@@ -371,7 +375,7 @@ def render_backtest() -> None:
     """Backtest tab: swing hit rate around planet aspects, moon phases and stations."""
     st.markdown("#### Backtest astro × swing")
     if "df" not in st.session_state:
-        st.info("Load data dulu di sidebar (**Load Data**). Backtest memakai data chart yang sedang ditampilkan.")
+        st.info("Load data dulu lewat **📂 Load Data** di sidebar. Backtest memakai data chart yang sedang ditampilkan.")
         return
     df, name = st.session_state["df"], st.session_state["name"]
     if not is_daily(df):
@@ -499,16 +503,16 @@ def show_backtest_report(result: dict, run_id: int, name: str) -> None:
                "dari 7 bar. Trend di suatu bar hanya memakai swing yang sudah terbentuk sebelum bar itu.")
 
 
-# ---------------------------------------------------------------- sidebar
-# Data loaded before the market choice existed: make the user load it again
-# rather than guess its market.
-if "df" in st.session_state and "market" not in st.session_state:
-    del st.session_state["df"]
+# ---------------------------------------------------------------- navigation
+# Sidebar navigation: one entry per tool, Astronomy has its own sub-menu.
+# Only the chosen view is drawn below the chart.
+NAV_TIME_GEOMETRY, NAV_ASTRONOMY = TOOLS[0][0], TOOLS[1][0]
 
-with st.sidebar:
-    st.header("📂 Load Data")
+
+def load_data_menu() -> None:
+    """Folder/upload picker and the two load buttons. On success the app reruns
+    so the (then collapsed) menu and the chart show the new data."""
     source = st.radio("Sumber CSV", ["Folder data/", "Upload file"], horizontal=True)
-
     chosen = None
     if source == "Folder data/":
         files = sorted(DATA_DIR.glob("*.csv")) if DATA_DIR.exists() else []
@@ -525,71 +529,124 @@ with st.sidebar:
             market = load_buttons()
             if market:
                 chosen = (Path(up.name).stem, up.getvalue(), market)
+    st.caption("Kolom: Date, Open, High, Low, Close (Volume opsional).")
 
-    if chosen is not None:
-        name, content, market = chosen
-        try:
-            tagged = tag_bars(load_ohlc_csv(content))
-            CACHE_DIR.mkdir(exist_ok=True)
-            tagged.to_csv(CACHE_DIR / f"{name}_tags.csv", index=False)
-            st.session_state["df"] = tagged
-            st.session_state["name"] = name
-            st.session_state["market"] = market
-            st.session_state.pop("error", None)
-        except Exception as exc:  # show the reason instead of crashing the app
-            st.session_state["error"] = f"Gagal load **{name}**: {exc}"
+    if chosen is None:
+        return
+    name, content, market = chosen
+    try:
+        tagged = tag_bars(load_ohlc_csv(content))
+        CACHE_DIR.mkdir(exist_ok=True)
+        tagged.to_csv(CACHE_DIR / f"{name}_tags.csv", index=False)
+    except Exception as exc:  # show the reason instead of crashing the app
+        st.session_state["error"] = f"Gagal load **{name}**: {exc}"
+        return
+    st.session_state.update(df=tagged, name=name, market=market)
+    st.session_state.pop("error", None)
+    st.rerun()
+
+
+NAV_CSS = """<style>
+.st-key-navtree { gap:2px; }
+.st-key-navtree button { justify-content:flex-start; border:none; border-radius:8px;
+  min-height:0; padding:5px 10px; color:var(--text-color); background:transparent; }
+.st-key-navtree button > div { justify-content:flex-start; width:100%; }
+.st-key-navtree button p { font-size:14px; }
+.st-key-navtree button:hover { background:rgba(128,128,128,.12); color:var(--text-color); }
+.st-key-navtree button[kind="secondary"] { background:rgba(128,128,128,.22); }
+.st-key-navtree [class*="st-key-navc_"] button { padding-left:30px; }
+</style>"""
+
+
+def _nav_select(item: str) -> None:
+    st.session_state["nav_sel"] = item
+
+
+def _nav_toggle_astro() -> None:
+    opening = not st.session_state.get("nav_astro_open", False)
+    st.session_state["nav_astro_open"] = opening
+    if opening and st.session_state.get("nav_sel", "tg") == "tg":
+        st.session_state["nav_sel"] = ASTRO_VIEWS[0][1]
+
+
+def nav_tree() -> tuple[str, tuple | None]:
+    """Tree menu like a file explorer: Time Geometry, and Astronomy with its
+    views indented below it (folds open/closed). Returns (tool label, astro view or None)."""
+    st.markdown(NAV_CSS, unsafe_allow_html=True)
+    sel = st.session_state.setdefault("nav_sel", "tg")
+    is_open = st.session_state.setdefault("nav_astro_open", sel != "tg")
+    with st.container(key="navtree"):
+        st.button(NAV_TIME_GEOMETRY, key="navp_tg", use_container_width=True,
+                  type="secondary" if sel == "tg" else "tertiary", on_click=_nav_select, args=("tg",))
+        st.button(f"{NAV_ASTRONOMY}  {'⌄' if is_open else '›'}", key="navp_astro", use_container_width=True,
+                  type="secondary" if sel != "tg" and not is_open else "tertiary", on_click=_nav_toggle_astro)
+        if is_open:
+            for label, view, _, _ in ASTRO_VIEWS:
+                st.button(label, key=f"navc_{view}", use_container_width=True,
+                          type="secondary" if sel == view else "tertiary", on_click=_nav_select, args=(view,))
+    if sel == "tg":
+        return NAV_TIME_GEOMETRY, None
+    return NAV_ASTRONOMY, next(v for v in ASTRO_VIEWS if v[1] == sel)
+
+
+# Data loaded before the market choice existed: make the user load it again
+# rather than guess its market.
+if "df" in st.session_state and "market" not in st.session_state:
+    del st.session_state["df"]
+
+with st.sidebar:
+    loaded = "df" in st.session_state
+    with st.expander("📂 Load Data", expanded=not loaded):
+        load_data_menu()
 
     if "error" in st.session_state:
         st.error(st.session_state["error"])
 
-    if "df" in st.session_state:
+    if loaded:
         df = st.session_state["df"]
-        st.divider()
-        st.caption("Data aktif")
-        st.markdown(f"**{st.session_state['name']}** · {MARKETS[st.session_state['market']]}")
-        st.write(f"{len(df):,} bar")
-        st.write(f"{df['Date'].iloc[0]:%d %b %Y} → {df['Date'].iloc[-1]:%d %b %Y}")
         counts = df["Tag"].value_counts()
-        st.write(f"Swing high: {counts.get(TAG_SWING_HIGH, 0)} · Swing low: {counts.get(TAG_SWING_LOW, 0)}")
-        st.caption(f"Tag tersimpan di `cache/{st.session_state['name']}_tags.csv`")
+        st.markdown(f"**{st.session_state['name']}** · {MARKETS[st.session_state['market']]}")
+        st.caption(f"{len(df):,} bar · {df['Date'].iloc[0]:%d/%m/%y} → {df['Date'].iloc[-1]:%d/%m/%y}  \n"
+                   f"^ {counts.get(TAG_SWING_HIGH, 0)} swing high · v {counts.get(TAG_SWING_LOW, 0)} swing low")
+
+    st.divider()
+    nav, astro_view = nav_tree()
 
 # ---------------------------------------------------------------- main
 if "df" not in st.session_state:
     st.title("ChronoGaze")
-    st.write("Pilih file CSV di menu **Load Data** (sidebar kiri), lalu klik "
+    st.write("Buka **📂 Load Data** di sidebar kiri, pilih file CSV, lalu klik "
              "**Load Saham IHSG** untuk emiten BEI atau **Load Komoditas Global** untuk emas, forex, crypto.")
-    st.caption("Kolom yang dibutuhkan: Date, Open, High, Low, Close (Volume opsional).")
 else:
     df = st.session_state["df"]
     render_chart(df, st.session_state["name"])
     with st.expander("Lihat data tabel"):
         st.dataframe(df.drop(columns="Tag").iloc[::-1], use_container_width=True, hide_index=True)
 
-# ---------------------------------------------------------------- tools
+# ---------------------------------------------------------------- chosen tool
 st.divider()
-for tab, (label, page) in zip(st.tabs([label for label, _ in TOOLS]), TOOLS):
-    with tab:
-        if page.exists():
-            html = page.read_text(encoding="utf-8")
-            if page == TIME_GEOMETRY_PAGE and "df" in st.session_state:
-                df = st.session_state["df"]
-                if (df["Date"].dt.normalize() == df["Date"]).all():
-                    market = st.session_state["market"]
-                    payload = time_geometry_payload(df, st.session_state["name"], market, TG_LAST_N)
-                    html = inject_before_first_script(html, payload)
-                    st.caption(f"{TG_LAST_N} swing high dan {TG_LAST_N} swing low terakhir sudah diisi ke "
-                               f"profil **{payload['name']}** (pasar {MARKETS[market]}). "
-                               "Profil ini ditimpa ulang setiap kali data di-load.")
-                else:
-                    st.caption("Data intraday: swing tidak dikirim ke Time Geometry (alat ini memakai tanggal harian).")
-            if page == ASTRONOMY_PAGE:
-                for sub, (_, view, height, css) in zip(st.tabs([v[0] for v in ASTRO_VIEWS]), ASTRO_VIEWS):
-                    with sub:
-                        if view == "backtest":
-                            render_backtest()
-                        else:
-                            components.html(astronomy_view(html, view, css), height=height, scrolling=True)
-                continue
-            components.html(html, height=TOOL_HEIGHT, scrolling=True)
+page = TIME_GEOMETRY_PAGE if nav == NAV_TIME_GEOMETRY else ASTRONOMY_PAGE
+st.subheader(nav if astro_view is None else f"{nav} · {astro_view[0]}")
+if not page.exists():
+    st.error(f"File tidak ditemukan: `{page}`")
+elif page == TIME_GEOMETRY_PAGE:
+    html = page.read_text(encoding="utf-8")
+    if "df" in st.session_state:
+        df = st.session_state["df"]
+        if is_daily(df):
+            market = st.session_state["market"]
+            payload = time_geometry_payload(df, st.session_state["name"], market, TG_LAST_N)
+            html = inject_before_first_script(html, payload)
+            st.caption(f"{TG_LAST_N} swing high dan {TG_LAST_N} swing low terakhir sudah diisi ke "
+                       f"profil **{payload['name']}** (pasar {MARKETS[market]}). "
+                       "Profil ini ditimpa ulang setiap kali data di-load.")
         else:
-            st.error(f"File tidak ditemukan: `{page}`")
+            st.caption("Data intraday: swing tidak dikirim ke Time Geometry (alat ini memakai tanggal harian).")
+    components.html(html, height=TOOL_HEIGHT, scrolling=True)
+else:
+    _, view, height, css = astro_view
+    if view == "backtest":
+        render_backtest()
+    else:
+        html = page.read_text(encoding="utf-8")
+        components.html(astronomy_view(html, view, css), height=height, scrolling=True)
