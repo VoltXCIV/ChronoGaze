@@ -4,3 +4,4 @@ yfinance>=0.2.40
 streamlit>=1.30
 pytest>=8.0
 astronomy-engine==2.1.19
+openpyxl>=3.1

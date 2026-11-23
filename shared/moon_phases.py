@@ -4,7 +4,7 @@ Computed with Astronomy Engine (the same library and the same
 SearchMoonQuarter / NextMoonQuarter search the Astronomy tab uses), so the
 dates here match the calculator.
 
-Dates are given in WIB (UTC+7), the time zone the rest of Stargazer uses
+Dates are given in WIB (UTC+7), the time zone the rest of ChronoGaze uses
 for IDX data. The database is saved to db/moon_phases.csv the first time it
 is needed and read from there afterwards.
 """

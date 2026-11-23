@@ -1022,13 +1022,13 @@ $('#crossW').addEventListener('input',recalcSoon);
 function syncTol(){$('#tolW').disabled=!$('#tolOn').checked;}
 $('#tolOn').addEventListener('change',()=>{syncTol();recalc();});syncTol();
 
-// ---------- Stargazer: swing dari chart ----------
-// Stargazer menyisipkan window.STARGAZER_SWINGS = {name, market, high:[DD-MM-YY], low:[...]}
+// ---------- ChronoGaze: swing dari chart ----------
+// ChronoGaze menyisipkan window.CHRONOGAZE_SWINGS = {name, market, high:[DD-MM-YY], low:[...]}
 // sebelum skrip ini jalan. Isinya ditulis ke profil bernama `name` (dibuat
 // bila belum ada, ditimpa bila sudah ada), lalu profil itu dibuka. Profil lain
 // tidak disentuh.
 (function(){
-  const SG=window.STARGAZER_SWINGS;
+  const SG=window.CHRONOGAZE_SWINGS;
   if(!SG||!SG.name)return;
   const m=SG.market==='global'?'global':'ihsg';
   stash();

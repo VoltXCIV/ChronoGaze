@@ -1,4 +1,4 @@
-# Stargazer
+# ChronoGaze
 
 Core shared library for swing detection and the feature modules that build on it.
 Modules (`modules/*`) are developed in separate discussions; this folder holds only `shared/`.

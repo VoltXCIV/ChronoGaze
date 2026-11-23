@@ -1,4 +1,4 @@
-// Stargazer patch: show the page's date inputs as DD/MM/YY (24-hour time).
+// ChronoGaze patch: show the page's date inputs as DD/MM/YY (24-hour time).
 // The browser's own date fields follow the OS locale (MM/DD/YYYY here), so
 // each one is hidden and a text field takes its place. The original input
 // stays the source of truth: the page's code keeps reading and writing it,
@@ -86,6 +86,7 @@
     .sg-date-wrap .sg-native{position:absolute;right:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0}`;
   document.head.appendChild(css);
 
+  window.CG_PROXY_DATE = proxy;   // reused by patch_retrograde.js for its own date fields
   proxy('dt', true);
   proxy('skStart', false);
   proxy('skEnd', false);

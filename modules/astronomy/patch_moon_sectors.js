@@ -1,4 +1,4 @@
-// Stargazer patch: under "Upcoming moon phases", show the zodiac sign the
+// ChronoGaze patch: under "Upcoming moon phases", show the zodiac sign the
 // Moon is in now and the sign it enters next, with the sectors each boosts.
 // A period runs from the moment the Moon enters a sign (its tropical ecliptic
 // longitude crosses a multiple of 30°) to the moment it leaves, about 2.5
@@ -7,7 +7,7 @@
   const A = window.Astronomy;
   const phases = document.getElementById('phases');
   if (!A || !phases) return;
-  const SECTORS = window.STARGAZER_SECTORS || {};
+  const SECTORS = window.CHRONOGAZE_SECTORS || {};
   const SIGNS = ['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo',
                  'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces'];
   const DAY = 864e5;
@@ -18,10 +18,14 @@
   phases.insertAdjacentElement('afterend', box);
   const css = document.createElement('style');
   css.textContent = `
-    .sg-moonsec{list-style:none;margin:0;padding:12px 14px;border-radius:8px;background:var(--surface2);display:grid;gap:8px;font-size:13.5px}
-    .sg-moonsec li{display:flex;gap:10px;align-items:baseline}
-    .sg-moonsec .p{font-family:var(--mono);color:var(--muted);white-space:nowrap}
-    .sg-moonsec b{color:var(--accent);font-weight:600}`;
+    .sg-moonsec{list-style:none;margin:0;padding:12px 14px;border-radius:8px;background:var(--surface2);display:grid;gap:12px;font-size:13.5px}
+    .sg-moonsec li{display:grid;gap:6px}
+    .sg-moonsec .hd{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline}
+    .sg-moonsec .p{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
+    .sg-moonsec b{color:var(--accent);font-weight:600}
+    .sg-moonsec .chips{display:flex;flex-wrap:wrap;gap:6px}
+    .sg-moonsec .chips span{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:3px 9px;font-size:12px;font-weight:600}
+    .sg-moonsec .none{color:var(--muted)}`;
   document.head.appendChild(css);
 
   const tz = () => parseFloat(document.getElementById('tz').value) || 0;
@@ -54,11 +58,16 @@
       const start = crossing(s * 30, new Date(t.getTime() - 3 * DAY), t);
       const end = crossing(((s + 1) % 12) * 30, t, new Date(t.getTime() + 3 * DAY));
       const after = crossing(((s + 2) % 12) * 30, new Date(end.getTime() + 60e3), new Date(end.getTime() + 3 * DAY));
-      const line = (from, to, sign, verb) =>
-        `<li><span class="p">${fmt(from)} – ${fmt(to)}</span>` +
-        `<span>moon ${verb} <b>${sign}</b> boosting sector ${SECTORS[sign] || '—'}</span></li>`;
-      box.innerHTML = line(start, end, SIGNS[s], 'is in') +
-                      line(end, after, SIGNS[(s + 1) % 12], 'is entering');
+      const tags = sign => (SECTORS[sign] || '').split(';').map(x => x.trim()).filter(Boolean);
+      const line = (from, to, sign, lead) => {
+        const t = tags(sign);
+        return `<li><div class="hd"><span>${lead} <b>${sign}</b> — favoured sectors:</span>` +
+          `<span class="p">${fmt(from)} – ${fmt(to)}</span></div>` +
+          (t.length ? `<div class="chips">${t.map(x => `<span>${x}</span>`).join('')}</div>`
+                    : '<div class="none">No sectors listed for this sign.</div>') + '</li>';
+      };
+      box.innerHTML = line(start, end, SIGNS[s], 'The Moon is in') +
+                      line(end, after, SIGNS[(s + 1) % 12], 'Next, the Moon enters');
     } catch (e) {
       box.innerHTML = `<li>Gagal menghitung posisi bulan: ${e.message}</li>`;
     }

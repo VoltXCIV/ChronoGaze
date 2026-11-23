@@ -38,4 +38,4 @@ def test_signs_and_sectors():
     assert sign_of(0) == "Aries" and sign_of(359.9) == "Pisces" and sign_of(360) == "Aries"
     sectors = load_sign_sectors()
     assert set(sectors) == set(SIGNS)
-    assert sectors["Taurus"] == "banking, investment, insurance"
+    assert sectors["Taurus"] == "Perbankan; Investasi; Asuransi"

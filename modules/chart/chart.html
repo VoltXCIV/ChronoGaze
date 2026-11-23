@@ -1,0 +1,222 @@
+<!-- ChronoGaze main chart. app.py fills in __PAYLOAD__, __HEIGHT__ and __LWC_URL__. -->
+<div id="wrap" style="height:__HEIGHT__px">
+  <div id="box">
+    <div id="sunbg"></div>
+    <div id="chart"></div>
+    <div id="sunfg"></div>
+    <div id="legend"></div>
+    <div id="tip" hidden></div>
+  </div>
+  <aside id="ind" aria-label="Indikator">
+    <div class="h">Indikator</div>
+    <div id="indList"></div>
+  </aside>
+</div>
+<style>
+  html, body { margin:0; background:#131722; font-family:-apple-system,Segoe UI,Roboto,sans-serif; color:#d1d4dc; }
+  #wrap { display:flex; width:100%; }
+  #box { position:relative; flex:1; min-width:0; height:100%; background:#131722; overflow:hidden; }
+  #chart { position:absolute; inset:0; z-index:1; }
+  #sunbg, #sunfg { position:absolute; left:0; top:0; overflow:hidden; pointer-events:none; }
+  #sunbg { z-index:0; }
+  #sunfg { z-index:2; }
+  #sunbg div { position:absolute; top:0; bottom:0; }
+  .zs { position:absolute; width:22px; height:22px; margin-left:-11px; margin-top:-11px; border-radius:50%;
+        display:flex; align-items:center; justify-content:center; font-size:14px; line-height:1;
+        color:#131722; cursor:default; pointer-events:auto; box-shadow:0 0 0 1px rgba(0,0,0,.35); }
+  .zs:hover { box-shadow:0 0 0 2px #d1d4dc; }
+  #legend { position:absolute; top:8px; left:12px; z-index:3; font-size:13px; pointer-events:none; }
+  #legend .t { font-size:15px; font-weight:600; margin-right:10px; }
+  #legend .k { color:#787b86; margin-left:8px; }
+  #tip { position:absolute; z-index:4; width:280px; max-width:calc(100% - 16px); box-sizing:border-box;
+         background:#1e222d; border:1px solid #363a45; border-radius:6px; padding:9px 11px;
+         font-size:12px; line-height:1.45; box-shadow:0 6px 18px rgba(0,0,0,.45); pointer-events:none; }
+  #tip .ttl { font-size:14px; font-weight:600; }
+  #tip .per { color:#9598a1; margin:2px 0 6px; }
+  #tip .lab { color:#9598a1; margin-top:5px; }
+  #tip .chips { display:flex; flex-wrap:wrap; gap:3px; margin-top:2px; }
+  #tip .chips span { background:#2a2e39; border-radius:3px; padding:1px 6px; }
+  #ind { width:150px; flex:none; border-left:1px solid #2a2e39; background:#131722; padding:8px 6px;
+         box-sizing:border-box; overflow-y:auto; }
+  #ind .h { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:#787b86; padding:0 4px 6px; }
+  .ind-row { display:flex; align-items:center; gap:7px; width:100%; min-height:30px; padding:4px; border:0;
+             border-radius:4px; background:none; color:#d1d4dc; font:inherit; font-size:13px; text-align:left; cursor:pointer; }
+  .ind-row:hover { background:#2a2e39; }
+  .ind-row:focus-visible { outline:2px solid #2962ff; outline-offset:-2px; }
+  .ind-row svg { width:16px; height:16px; flex:none; fill:none; stroke:currentColor; stroke-width:2;
+                 stroke-linecap:round; stroke-linejoin:round; }
+  .ind-row.off { color:#5d606b; }
+  .ind-row.off .nm { text-decoration:line-through; }
+  @media (max-width:560px) { #ind { width:44px; } #ind .h, .ind-row .nm { display:none; } }
+</style>
+<script src="__LWC_URL__"></script>
+<script>
+const data = __PAYLOAD__;
+const box = document.getElementById('box');
+const el = document.getElementById('chart');
+const chart = LightweightCharts.createChart(el, {
+  autoSize: true,
+  // transparent so the Sun in Sign blocks behind the chart show through
+  layout: { background: { type: 'solid', color: 'rgba(0,0,0,0)' }, textColor: '#d1d4dc' },
+  grid: { vertLines: { color: 'rgba(42,46,57,.6)' }, horzLines: { color: 'rgba(42,46,57,.6)' } },
+  crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+  rightPriceScale: { borderColor: '#2a2e39', scaleMargins: { top: 0.08, bottom: 0.27 } },
+  timeScale: { borderColor: '#2a2e39', rightOffset: 5 },
+});
+const ts = chart.timeScale();
+const candle = chart.addCandlestickSeries({
+  upColor: '#26a69a', downColor: '#ef5350', borderVisible: false,
+  wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+});
+candle.setData(data.candles);
+const vol = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol' });
+chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.74, bottom: 0.13 } });
+vol.setData(data.volumes);
+
+// New/full moon row along the bottom of the chart. The series is invisible;
+// it only carries the emoji markers and the empty future bars.
+const moon = chart.addLineSeries({
+  priceScaleId: 'moon', color: 'rgba(0,0,0,0)', lineVisible: false,
+  lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+});
+chart.priceScale('moon').applyOptions({ visible: false, scaleMargins: { top: 0.96, bottom: 0.01 } });
+moon.setData(data.moonSeries);
+const moonByTime = new Map(data.moonMarkers.map(m => [m.time, m.id.split('|')]));
+
+// ---------------- Sun in Sign ----------------
+// Blocks behind the chart, 80% transparent, coloured by element; the sign's
+// symbol sits in the middle of the visible part of each block, in a row
+// just above the moon row. Hovering the symbol shows the boosted tags.
+const ELEMENT_RGB = { Water: '120,170,255', Fire: '255,128,128', Air: '130,215,150', Earth: '255,225,120' };
+const rgbOf = sign => ELEMENT_RGB[(data.sunInfo[sign] || {}).element] || '180,180,180';
+const sunbg = document.getElementById('sunbg'), sunfg = document.getElementById('sunfg'), tip = document.getElementById('tip');
+const pad = n => String(n).padStart(2, '0');
+const dmy = s => s ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(2, 4)} ${s.slice(11, 16)}` : '…';
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const chips = s => s ? `<div class="chips">${s.split(';').map(x => x.trim()).filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('')}</div>` : '<div style="color:#5d606b">—</div>';
+let sunOn = true, sunFrame = 0;
+
+function drawSun() {
+  sunFrame = 0;
+  sunbg.innerHTML = ''; sunfg.innerHTML = '';
+  if (!sunOn || !data.sunSegs.length) { tip.hidden = true; return; }
+  const pw = el.clientWidth - chart.priceScale('right').width();
+  const ph = el.clientHeight - ts.height();
+  for (const layer of [sunbg, sunfg]) { layer.style.width = pw + 'px'; layer.style.height = ph + 'px'; }
+  const r = ts.getVisibleLogicalRange();
+  if (!r) return;
+  const y = Math.round(ph * 0.905);
+  // logicalToCoordinate only takes whole bar indexes, so a block's edges are
+  // its first/last bar centre minus/plus half the bar spacing.
+  const half = ts.options().barSpacing / 2;
+  let bg = '', fg = '';
+  data.sunSegs.forEach((s, i) => {
+    if (s.to + 0.5 < r.from || s.from - 0.5 > r.to) return;
+    const c0 = ts.logicalToCoordinate(s.from), c1 = ts.logicalToCoordinate(s.to);
+    if (c0 === null || c1 === null) return;
+    const x0 = c0 - half, x1 = c1 + half;
+    const rgb = rgbOf(s.sign);
+    bg += `<div style="left:${x0}px;width:${Math.max(0, x1 - x0)}px;background:rgba(${rgb},.2)"></div>`;
+    const a = Math.max(x0, 0), b = Math.min(x1, pw);           // visible part only
+    if (b - a < 24) return;
+    const info = data.sunInfo[s.sign] || {};
+    fg += `<div class="zs" data-i="${i}" style="left:${(a + b) / 2}px;top:${y}px;background:rgb(${rgb})" ` +
+          `aria-label="${s.sign}">${info.symbol || '?'}&#xFE0E;</div>`;
+  });
+  sunbg.innerHTML = bg; sunfg.innerHTML = fg;
+}
+const redrawSun = () => { if (!sunFrame) sunFrame = requestAnimationFrame(drawSun); };
+ts.subscribeVisibleLogicalRangeChange(redrawSun);
+new ResizeObserver(redrawSun).observe(el);
+
+sunfg.addEventListener('mouseover', e => {
+  const z = e.target.closest('.zs');
+  if (!z) return;
+  const s = data.sunSegs[+z.dataset.i], info = data.sunInfo[s.sign] || {};
+  tip.innerHTML = `<div class="ttl">${info.symbol}&#xFE0E; ${esc(s.sign)} <span style="color:#9598a1;font-weight:400">· ${esc(info.element || '')}</span></div>` +
+    `<div class="per">Sun in ${esc(s.sign)}: ${dmy(s.start)} – ${dmy(s.end)} WIB</div>` +
+    `<div class="lab">Industry boost · Bias &amp; Basket</div>${chips(info.bias)}` +
+    `<div class="lab">Industry boost · 5Y Winners</div>${chips(info.winners)}`;
+  tip.hidden = false;
+  const zr = z.getBoundingClientRect(), br = box.getBoundingClientRect();
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  const cx = zr.left + zr.width / 2 - br.left;
+  tip.style.left = Math.min(Math.max(8, cx - w / 2), br.width - w - 8) + 'px';
+  tip.style.top = Math.max(8, zr.top - br.top - h - 8) + 'px';
+});
+sunfg.addEventListener('mouseout', e => { if (e.target.closest('.zs')) tip.hidden = true; });
+
+function sunAt(logical) {
+  const i = Math.round(logical);
+  return data.sunSegs.find(s => i >= s.from && i <= s.to);
+}
+
+// ---------------- legend ----------------
+const byTime = new Map(data.candles.map((c, i) => [JSON.stringify(c.time), i]));
+const legend = document.getElementById('legend');
+const fmt = (x) => x.toLocaleString('id-ID', { maximumFractionDigits: 2 });
+let volOn = true, moonOn = true;
+function showLegend(i) {
+  const c = data.candles[i], v = data.volumes[i];
+  const chg = i > 0 ? (c.close / data.candles[i-1].close - 1) * 100 : 0;
+  const col = c.close >= c.open ? '#26a69a' : '#ef5350';
+  legend.innerHTML = `<span class="t">${data.title}</span>` +
+    `<span class="k">O</span> <span style="color:${col}">${fmt(c.open)}</span>` +
+    `<span class="k">H</span> <span style="color:${col}">${fmt(c.high)}</span>` +
+    `<span class="k">L</span> <span style="color:${col}">${fmt(c.low)}</span>` +
+    `<span class="k">C</span> <span style="color:${col}">${fmt(c.close)}</span>` +
+    `<span style="color:${col}"> (${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%)</span>` +
+    (volOn ? `<span class="k">Vol</span> ${fmt(v.value)}` : '');
+}
+function updateLegend(p) {
+  const i = p && p.time !== undefined ? byTime.get(JSON.stringify(p.time)) : undefined;
+  showLegend(i !== undefined ? i : data.candles.length - 1);
+  const logical = p && p.logical !== undefined ? p.logical : data.candles.length - 1;
+  const s = sunOn ? sunAt(logical) : null;
+  if (s) legend.innerHTML += `<span class="k">Sun</span> ${(data.sunInfo[s.sign] || {}).symbol || ''}&#xFE0E; ${s.sign}`;
+  const m = moonOn && p && p.time !== undefined ? moonByTime.get(p.time) : undefined;
+  if (m) legend.innerHTML += `<span class="k">${m[0] === 'FULL' ? '🌕 Full moon' : '🌑 New moon'}</span> ${m[1].slice(0, 16)} WIB`;
+}
+chart.subscribeCrosshairMove(updateLegend);
+
+// ---------------- indicator toggles ----------------
+// Every indicator on the chart is listed here with an eye button to show or
+// hide it. The choice is remembered in this browser.
+const EYE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/></svg>';
+const INDICATORS = [
+  { id: 'sun', name: 'Sun in Sign', apply: on => { sunOn = on; drawSun(); } },
+  { id: 'moon', name: 'Moon Phase', apply: on => { moonOn = on; moon.setMarkers(on ? data.moonMarkers : []); } },
+  { id: 'swing', name: 'Swing ^ v', apply: on => candle.setMarkers(on ? data.markers : []) },
+  { id: 'vol', name: 'Volume', apply: on => { volOn = on; vol.applyOptions({ visible: on }); } },
+];
+const store = {
+  get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} },
+};
+const list = document.getElementById('indList');
+INDICATORS.forEach(ind => {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'ind-row';
+  list.appendChild(btn);
+  const set = on => {
+    btn.classList.toggle('off', !on);
+    btn.setAttribute('aria-pressed', String(on));
+    btn.title = (on ? 'Sembunyikan ' : 'Tampilkan ') + ind.name;
+    btn.innerHTML = (on ? EYE : EYE_OFF) + `<span class="nm">${ind.name}</span>`;
+    store.set('cg.ind.' + ind.id, on ? '1' : '0');
+    ind.apply(on);
+    updateLegend();
+  };
+  btn.addEventListener('click', () => set(btn.classList.contains('off')));
+  set(store.get('cg.ind.' + ind.id) !== '0');
+});
+
+// Start zoomed on the most recent ~150 bars plus the next few weeks.
+const n = data.candles.length;
+const ahead = Math.min(25, data.moonSeries.filter(x => !byTime.has(JSON.stringify(x.time))).length);
+if (n > 150) ts.setVisibleLogicalRange({ from: n - 150, to: n + Math.max(5, ahead) });
+else ts.fitContent();
+redrawSun();
+</script>

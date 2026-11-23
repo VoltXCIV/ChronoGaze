@@ -6,3 +6,9 @@ __pycache__/
 
 # Generated per load; rebuilt automatically
 cache/
+
+# Backtest run history: rewritten on every run, kept local
+db/backtest.sqlite
+
+# Empty nested git repo (not part of the app)
+ChronoGazeee/
