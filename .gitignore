@@ -6,6 +6,3 @@ __pycache__/
 
 # Generated per load; rebuilt automatically
 cache/
-
-# Your own price CSVs stay on this computer (upload them in the app instead)
-data/*.csv
