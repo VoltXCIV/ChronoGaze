@@ -4,8 +4,14 @@
     <div id="sunbg"></div>
     <div id="chart"></div>
     <div id="sunfg"></div>
+    <div id="tgl"></div>
     <div id="legend"></div>
     <div id="tip" hidden></div>
+    <div id="scalebar" role="toolbar" aria-label="Skala harga">
+      <button type="button" data-k="pct" title="Label sumbu Y dalam persen; 0% = Open bar paling kiri yang terlihat">%</button>
+      <button type="button" data-k="log" title="Skala logaritmik (jarak sama = persentase sama)">log</button>
+      <button type="button" data-k="auto" title="Sumbu harga otomatis menyesuaikan high/low yang terlihat">auto</button>
+    </div>
   </div>
   <aside id="ind" aria-label="Indikator">
     <div class="h">Indikator</div>
@@ -21,6 +27,11 @@
   #sunbg { z-index:0; }
   #sunfg { z-index:2; }
   #sunbg div { position:absolute; top:0; bottom:0; }
+  #tgl { position:absolute; left:0; top:0; z-index:2; overflow:hidden; pointer-events:none; }
+  #tgl .ln { position:absolute; top:0; bottom:0; width:0; border-left:2px solid; }
+  #tgl .ln.near { border-left-style:dashed; }
+  #tgl .lb { position:absolute; top:30px; transform:translateX(-50%); white-space:nowrap; font-size:11px; font-weight:600;
+             padding:2px 6px; border-radius:4px; color:#131722; box-shadow:0 1px 4px rgba(0,0,0,.4); }
   .zs { position:absolute; width:22px; height:22px; margin-left:-11px; margin-top:-11px; border-radius:50%;
         display:flex; align-items:center; justify-content:center; font-size:14px; line-height:1;
         color:#131722; cursor:default; pointer-events:auto; box-shadow:0 0 0 1px rgba(0,0,0,.35); }
@@ -36,6 +47,13 @@
   #tip .lab { color:#9598a1; margin-top:5px; }
   #tip .chips { display:flex; flex-wrap:wrap; gap:3px; margin-top:2px; }
   #tip .chips span { background:#2a2e39; border-radius:3px; padding:1px 6px; }
+  #scalebar { position:absolute; right:0; bottom:0; z-index:3; display:flex; align-items:center; gap:1px;
+              padding:0 3px; background:#131722; border-top:1px solid #2a2e39; border-left:1px solid #2a2e39; box-sizing:border-box; }
+  #scalebar button { border:0; border-radius:3px; background:none; color:#787b86; font:inherit; font-size:11px;
+                     line-height:1; padding:3px 5px; cursor:pointer; }
+  #scalebar button:hover { background:#2a2e39; color:#d1d4dc; }
+  #scalebar button.on { color:#2962ff; }
+  #scalebar button:focus-visible { outline:2px solid #2962ff; outline-offset:-2px; }
   #ind { width:150px; flex:none; border-left:1px solid #2a2e39; background:#131722; padding:8px 6px;
          box-sizing:border-box; overflow-y:auto; }
   #ind .h { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:#787b86; padding:0 4px 6px; }
@@ -58,6 +76,7 @@
 <script>
 const data = __PAYLOAD__;
 const box = document.getElementById('box');
+const scalebar = document.getElementById('scalebar');
 const el = document.getElementById('chart');
 const chart = LightweightCharts.createChart(el, {
   autoSize: true,
@@ -74,7 +93,17 @@ const candle = chart.addCandlestickSeries({
   wickUpColor: '#26a69a', wickDownColor: '#ef5350',
 });
 candle.setData(data.candles);
-const vol = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol' });
+// Numbers in Indonesian style: '.' groups thousands, ',' marks decimals (1.000,5).
+const idNum = (x, min, max) => x.toLocaleString('id-ID', { minimumFractionDigits: min, maximumFractionDigits: max });
+const idPrice = p => idNum(p, 0, 2);
+const idPct = v => (v < 0 ? '−' : v > 0 ? '+' : '') + idNum(Math.abs(v), 2, 2) + '%';
+const idVol = v => {
+  const a = Math.abs(v);
+  for (const [n, u] of [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K']]) if (a >= n) return idNum(v / n, 0, 2) + u;
+  return idNum(v, 0, 0);
+};
+candle.applyOptions({ priceFormat: { type: 'custom', formatter: idPrice, minMove: 0.01 } });
+const vol = chart.addHistogramSeries({ priceFormat: { type: 'custom', formatter: idVol, minMove: 1 }, priceScaleId: 'vol' });
 chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.74, bottom: 0.13 } });
 vol.setData(data.volumes);
 
@@ -107,6 +136,7 @@ function drawSun() {
   if (!sunOn || !data.sunSegs.length) { tip.hidden = true; return; }
   const pw = el.clientWidth - chart.priceScale('right').width();
   const ph = el.clientHeight - ts.height();
+  scalebar.style.height = ts.height() + 'px';
   for (const layer of [sunbg, sunfg]) { layer.style.width = pw + 'px'; layer.style.height = ph + 'px'; }
   const r = ts.getVisibleLogicalRange();
   if (!r) return;
@@ -156,10 +186,90 @@ function sunAt(logical) {
   return data.sunSegs.find(s => i >= s.from && i <= s.to);
 }
 
+// ---------------- Time Geometry Top 5 ----------------
+// The Time Geometry tab saves its Top 5 next-swing dates to localStorage
+// ('cg.tg.top5'). Two vertical lines are drawn from it: a solid one on the
+// rank #1 date and a dashed one on the nearest of the five dates (one line
+// when they are the same date). Only a Top 5 made from this chart's own swing
+// profile ("<title> · chart") is drawn, so another stock's dates never show.
+const tgl = document.getElementById('tgl');
+const allTimes = data.candles.map(c => c.time)
+  .concat(data.moonSeries.map(x => x.time).filter(t => !byTimeAll(t)));
+function byTimeAll(t) { return data.candles.length && typeof t === 'string' && t <= data.candles[data.candles.length - 1].time; }
+// bar index for a 'YYYY-MM-DD' date: that bar, or the first bar after it
+function barOf(d) {
+  if (typeof allTimes[0] !== 'string') return -1;            // intraday chart: not used
+  let lo = 0, hi = allTimes.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (allTimes[m] < d) lo = m + 1; else hi = m; }
+  return lo < allTimes.length ? lo : -1;
+}
+let tgOn = true, tgFrame = 0, tgLines = [];
+function loadTop5() {
+  tgLines = [];
+  let v = null;
+  try { v = JSON.parse(localStorage.getItem('cg.tg.top5') || 'null'); } catch (e) {}
+  if (!v || !v.dates || !v.dates.length || v.profile !== data.title + ' · chart') return;
+  const color = v.kind === 'low' ? '#2196f3' : '#f0b90b';
+  const sw = v.kind === 'low' ? 'swing low' : 'swing high';
+  const first = v.dates.find(x => x.rank === 1);
+  const near = v.dates.reduce((a, b) => (b.d < a.d ? b : a));
+  const show = d => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(2, 4)}`;
+  if (first) tgLines.push({ i: barOf(first.d), color, near: false,
+    text: `#1${near.d === first.d ? ' · terdekat' : ''} ${sw} ${show(first.d)}` });
+  if (near.d !== (first || {}).d) tgLines.push({ i: barOf(near.d), color, near: true,
+    text: `#${near.rank} terdekat ${show(near.d)}` });
+  tgLines = tgLines.filter(l => l.i >= 0);
+}
+function drawTg() {
+  tgFrame = 0;
+  const pw = el.clientWidth - chart.priceScale('right').width();
+  const ph = el.clientHeight - ts.height();
+  tgl.style.width = pw + 'px'; tgl.style.height = ph + 'px';
+  let h = '';
+  if (tgOn) tgLines.forEach((l, k) => {
+    const x = ts.logicalToCoordinate(l.i);
+    if (x === null || x < 0 || x > pw) return;
+    h += `<div class="ln${l.near ? ' near' : ''}" style="left:${x - 1}px;border-color:${l.color}"></div>` +
+         `<div class="lb" style="left:${Math.min(Math.max(x, 70), pw - 70)}px;top:${40 + k * 22}px;background:${l.color}">${esc(l.text)}</div>`;
+  });
+  tgl.innerHTML = h;
+}
+const redrawTg = () => { if (!tgFrame) tgFrame = requestAnimationFrame(drawTg); };
+ts.subscribeVisibleLogicalRangeChange(redrawTg);
+new ResizeObserver(redrawTg).observe(el);
+window.addEventListener('storage', e => { if (e.key === 'cg.tg.top5') { loadTop5(); redrawTg(); } });
+loadTop5();
+
+// ---------------- Backtest: next dates of strong events ----------------
+// After an Astronomy · Backtest run, every event whose swing % is at least 70%
+// gets a ◆ on the bar of its next occurrence (data.btNext). Several events on
+// one bar share a marker; the legend lists them when the crosshair is there.
+const btByTime = new Map();
+for (const m of data.btNext || []) {
+  const i = barOf(m.date);
+  if (i < 0) continue;
+  const t = allTimes[i];
+  if (!btByTime.has(t)) btByTime.set(t, []);
+  btByTime.get(t).push(m);
+}
+const btSeries = chart.addLineSeries({
+  priceScaleId: 'btnext', color: 'rgba(0,0,0,0)', lineVisible: false,
+  lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+});
+chart.priceScale('btnext').applyOptions({ visible: false, scaleMargins: { top: 0.12, bottom: 0.84 } });
+const btTimes = allTimes.filter(t => btByTime.has(t));
+btSeries.setData(btTimes.map(t => ({ time: t, value: 0 })));
+const btMarkers = btTimes.map(t => {
+  const ms = btByTime.get(t), top = Math.max(...ms.map(m => m.pct));
+  return { time: t, position: 'aboveBar', color: '#c77dff', shape: 'arrowDown',
+           text: `◆ ${top.toLocaleString('id-ID', { maximumFractionDigits: 1 })}%` + (ms.length > 1 ? ` +${ms.length - 1}` : '') };
+});
+let btOn = true;
+
 // ---------------- legend ----------------
 const byTime = new Map(data.candles.map((c, i) => [JSON.stringify(c.time), i]));
 const legend = document.getElementById('legend');
-const fmt = (x) => x.toLocaleString('id-ID', { maximumFractionDigits: 2 });
+const fmt = idPrice;
 let volOn = true, moonOn = true;
 function showLegend(i) {
   const c = data.candles[i], v = data.volumes[i];
@@ -170,7 +280,7 @@ function showLegend(i) {
     `<span class="k">H</span> <span style="color:${col}">${fmt(c.high)}</span>` +
     `<span class="k">L</span> <span style="color:${col}">${fmt(c.low)}</span>` +
     `<span class="k">C</span> <span style="color:${col}">${fmt(c.close)}</span>` +
-    `<span style="color:${col}"> (${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%)</span>` +
+    `<span style="color:${col}"> (${idPct(chg)})</span>` +
     (volOn ? `<span class="k">Vol</span> ${fmt(v.value)}` : '');
 }
 function updateLegend(p) {
@@ -181,6 +291,10 @@ function updateLegend(p) {
   if (s) legend.innerHTML += `<span class="k">Sun</span> ${(data.sunInfo[s.sign] || {}).symbol || ''}&#xFE0E; ${s.sign}`;
   const m = moonOn && p && p.time !== undefined ? moonByTime.get(p.time) : undefined;
   if (m) legend.innerHTML += `<span class="k">${m[0] === 'FULL' ? '🌕 Full moon' : '🌑 New moon'}</span> ${m[1].slice(0, 16)} WIB`;
+  // ◆ strong backtest events whose next occurrence falls on this bar
+  const bm = btOn && p && p.time !== undefined ? btByTime.get(p.time) : undefined;
+  if (bm) legend.innerHTML += `<div style="margin-top:3px;color:#c77dff">◆ ${bm.map(x =>
+    `${esc(x.event)} ${x.time} WIB (${x.pct.toLocaleString('id-ID')}% swing)`).join(' · ')}</div>`;
 }
 chart.subscribeCrosshairMove(updateLegend);
 
@@ -220,6 +334,8 @@ const INDICATORS = [
   { id: 'swing', name: 'Swing ^ v', def: true, excl: 'dswing', apply: on => { swingOn = on; applySwings(); } },
   { id: 'dswing', name: 'Denoised Swing', def: false, excl: 'swing', apply: on => { dswingOn = on; applySwings(); } },
   { id: 'mother', name: 'Mother Candle Swing', def: true, apply: on => { motherOn = on; applySwings(); } },
+  { id: 'btnext', name: 'Event Backtest ≥70%', def: true, apply: on => { btOn = on; btSeries.setMarkers(on ? btMarkers : []); } },
+  { id: 'tg', name: 'Top 5 Time Geometry', def: true, apply: on => { tgOn = on; redrawTg(); } },
   { id: 'vol', name: 'Volume', def: true, apply: on => { volOn = on; vol.applyOptions({ visible: on }); } },
 ];
 const store = {
@@ -269,10 +385,76 @@ INDICATORS.forEach(ind => {
   setters[ind.id].set(on);
 });
 
+// ---------------- price scale switches (% / log / auto) ----------------
+// %    : the Y axis reads as percent change from the Open of the leftmost
+//        bar on screen (that Open = 0%; e.g. 0%, +15%, −5%). Scrolling or
+//        zooming picks the new leftmost bar as 0%. Off = plain prices.
+//        Done by drawing the candles as price / base × 100, so the axis gets
+//        round steps; labels show that value − 100 as a percent. The legend
+//        keeps the real prices. Works together with log.
+// log  : logarithmic scale; off = linear.
+// auto : the scale follows the high/low of the visible bars. Dragging the
+//        price axis switches it off (the chart library does that); a
+//        double-click on the axis or the button switches it back on.
+// % and log are remembered in this browser; auto always starts on.
+const rightScale = chart.priceScale('right');
+const PRICE_FMT = { type: 'custom', formatter: idPrice, minMove: 0.01 };
+const PCT_FMT = { type: 'custom', minMove: 0.01, formatter: v => {
+  const d = v - 100;
+  if (Math.abs(d) < 0.005) return '0%';
+  return (d < 0 ? '−' : '+') + idNum(Math.abs(d), 0, 2) + '%';
+} };
+let pctOn = store.get('cg.scale.pct') === '1', logOn = store.get('cg.scale.log') === '1', pctBase;   // undefined until the first applyPct()
+function leftmostOpen() {
+  const r = ts.getVisibleLogicalRange();
+  const i = r ? Math.min(data.candles.length - 1, Math.max(0, Math.ceil(r.from))) : 0;
+  return data.candles[i].open;
+}
+function applyPct() {
+  const base = pctOn ? leftmostOpen() : null;
+  if (base === pctBase) return;
+  const switching = (base === null) !== (pctBase === null || pctBase === undefined);
+  pctBase = base;
+  const k = base === null ? 1 : 100 / base;
+  candle.setData(base === null ? data.candles : data.candles.map(c => ({
+    time: c.time, open: c.open * k, high: c.high * k, low: c.low * k, close: c.close * k })));
+  candle.applyOptions({ priceFormat: base === null ? PRICE_FMT : PCT_FMT });
+  // price <-> percent: a manually set range would be in the wrong units
+  if (switching) rightScale.applyOptions({ autoScale: true });
+}
+function syncScaleButtons() {
+  const st = { pct: pctOn, log: logOn, auto: rightScale.options().autoScale };
+  scalebar.querySelectorAll('button').forEach(b => {
+    b.classList.toggle('on', st[b.dataset.k]);
+    b.setAttribute('aria-pressed', String(st[b.dataset.k]));
+  });
+}
+scalebar.addEventListener('click', e => {
+  const k = (e.target.closest('button') || {}).dataset?.k;
+  if (k === 'pct') { pctOn = !pctOn; store.set('cg.scale.pct', pctOn ? '1' : '0'); applyPct(); }
+  if (k === 'log') {
+    logOn = !logOn; store.set('cg.scale.log', logOn ? '1' : '0');
+    rightScale.applyOptions({ mode: logOn ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal });
+  }
+  if (k === 'auto') rightScale.applyOptions({ autoScale: !rightScale.options().autoScale });
+  syncScaleButtons();
+});
+// the library changes autoScale itself on axis drag / double-click: mirror it
+for (const ev of ['pointerup', 'dblclick', 'wheel']) el.addEventListener(ev, () => setTimeout(syncScaleButtons, 0), true);
+let pctFrame = 0;
+ts.subscribeVisibleLogicalRangeChange(() => {
+  if (pctOn && !pctFrame) pctFrame = requestAnimationFrame(() => { pctFrame = 0; applyPct(); });
+});
+if (logOn) rightScale.applyOptions({ mode: LightweightCharts.PriceScaleMode.Logarithmic });
+
 // Start zoomed on the most recent ~150 bars plus the next few weeks.
 const n = data.candles.length;
 const ahead = Math.min(25, data.moonSeries.filter(x => !byTime.has(JSON.stringify(x.time))).length);
-if (n > 150) ts.setVisibleLogicalRange({ from: n - 150, to: n + Math.max(5, ahead) });
+// ...and far enough right to show the first ◆ backtest event mark.
+const firstBt = btTimes.length ? allTimes.indexOf(btTimes[0]) - n + 12 : 0;
+if (n > 150) ts.setVisibleLogicalRange({ from: n - 150, to: n + Math.max(5, ahead, firstBt) });
 else ts.fitContent();
+applyPct();
+syncScaleButtons();
 redrawSun();
 </script>

@@ -86,3 +86,40 @@ def trend_states(tagged: pd.DataFrame, tol: float = SIDEWAYS_TOL,
         else:
             out.append(NONE)
     return out
+
+
+def current_trend(tagged: pd.DataFrame, none_as: str = NONE) -> dict:
+    """Trend at the last bar of `tagged`, with the date that state began.
+
+    {"trend": "Uptrend" | "Downtrend" | "Sideways" | "", "since": "YYYY-MM-DD" or "",
+     "last": "YYYY-MM-DD"} (dates from the "Date" column). Bars with no trend
+    are labelled `none_as` (e.g. SIDEWAYS) before the state and its start are read.
+    """
+    states = [s or none_as for s in trend_states(tagged)]
+    if not states:
+        return {"trend": NONE, "since": "", "last": ""}
+    dates = pd.to_datetime(tagged["Date"]).dt.strftime("%Y-%m-%d").tolist()
+    now, i = states[-1], len(states) - 1
+    while i > 0 and states[i - 1] == now:
+        i -= 1
+    return {"trend": now, "since": dates[i] if now else "", "last": dates[-1]}
+
+
+TREND_DENOISE = 3            # candles merged by Denoised Swing before reading a stock's trend
+
+
+def stock_trend(df: pd.DataFrame, period: int = TREND_DENOISE) -> dict:
+    """Current trend of a stock (OHLC with Date, High, Low), as shown in the Aspect Calendar.
+
+    Swings are marked with Denoised Swing (`period` candles), then the trend
+    rules above are read; a bar with no trend counts as Sideways. Same dict as
+    current_trend().
+    """
+    from shared.swing_detector import TAG_NONE, denoised_swings
+
+    data = df.reset_index(drop=True).copy()
+    tags = [TAG_NONE] * len(data)
+    for i, kind in denoised_swings(data["High"].to_numpy(dtype=float), data["Low"].to_numpy(dtype=float), period):
+        tags[i] = kind
+    data["Tag"] = tags
+    return current_trend(data, none_as=SIDEWAYS)

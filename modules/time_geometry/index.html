@@ -206,10 +206,9 @@ td.score{width:1%}
 @media (max-width:820px),(max-height:520px){
   .app{display:block}
   .side,.main{display:contents}
-  .tabs{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--panel);border-top:1px solid var(--line);padding:6px 10px calc(6px + env(safe-area-inset-bottom));gap:6px}
+  .tabs{display:flex;position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line);padding:8px 0;margin:10px 0 14px;gap:6px}
   .tabs button{flex:1;border:0;background:transparent;min-height:44px;font-weight:600;color:var(--muted);border-radius:8px}
   .tabs button[aria-selected="true"]{background:var(--red-soft);color:var(--red-ink)}
-  body{padding-bottom:76px}
   .v-input,.v-hasil,.v-set{display:none}
   .app[data-tab="input"] .v-input,.app[data-tab="hasil"] .v-hasil,.app[data-tab="set"] .v-set{display:block}
   .app[data-tab="input"] .two.v-input,.app[data-tab="hasil"] .two.v-hasil{display:grid}
@@ -223,7 +222,7 @@ td.score{width:1%}
   h1{font-size:17px}
   .sub{display:none}
   .segbtn{min-height:32px}
-  .tabs{position:sticky;top:0;bottom:auto;border-top:0;border-bottom:1px solid var(--line);padding:4px 0;margin-top:8px}
+  .tabs{padding:4px 0;margin:8px 0 10px}
   .tabs button{min-height:36px}
   td{padding:5px 8px}
   .panel{padding:10px 12px}
@@ -246,7 +245,7 @@ td.score{width:1%}
         <button type="button" class="segbtn" id="mkGlobal" role="radio" aria-checked="false" data-market="global">Global</button>
       </span>
       <p class="sub" id="subIhsg">Proyeksi tanggal swing high dan swing low berikutnya dari jarak antar swing sebelumnya × rasio Fibonacci. Jarak dihitung dalam hari bursa; weekend dan libur bursa dilewati.</p>
-      <p class="sub" id="subGlobal" hidden>Proyeksi tanggal swing high dan swing low berikutnya dari jarak antar swing sebelumnya × rasio Fibonacci. Libur bursa tidak dihitung; weekend bisa disertakan untuk pasar 7 hari seperti crypto.</p>
+      <p class="sub" id="subGlobal" hidden>Proyeksi tanggal swing high dan swing low berikutnya dari jarak antar swing sebelumnya × rasio Fibonacci. Libur bursa tidak dihitung. Weekend mengikuti data: crypto diperdagangkan setiap hari, pasar global lain libur Sabtu dan Minggu.</p>
     </div>
   </header>
 
@@ -279,11 +278,12 @@ td.score{width:1%}
     </section>
 
     <section class="panel v-input" id="panelWeekend" hidden>
-      <h2 class="gh">Kalender pasar<button type="button" class="info" data-tip="Off: hanya Senin–Jumat dihitung sebagai bar (saham, indeks, forex). On: Sabtu dan Minggu ikut dihitung (crypto, pasar 7 hari)." aria-label="Keterangan" aria-expanded="false">i</button></h2>
+      <h2 class="gh">Kalender pasar<button type="button" class="info" data-tip="Off: hanya Senin–Jumat dihitung sebagai bar (saham, indeks, forex). On: Sabtu dan Minggu ikut dihitung (crypto, pasar 7 hari). Libur bursa tidak dipakai di Global. Untuk profil dari chart, ini diatur otomatis dari data CSV." aria-label="Keterangan" aria-expanded="false">i</button></h2>
       <div class="switch-row">
         <label for="wkOn">Sertakan weekend</label>
         <input type="checkbox" id="wkOn" class="switch">
       </div>
+      <div class="hint" id="wkHint" hidden></div>
     </section>
 
     <section class="panel v-input" id="panelHolidays">
@@ -370,7 +370,7 @@ td.score{width:1%}
     <section class="panel v-hasil onboard" id="onboard" hidden>
       <h2>Mulai</h2>
       <ol>
-        <li><b>Lengkapi libur bursa</b><span id="ob1">Tempel daftar libur BEI di panel Libur bursa; weekend sudah dikecualikan otomatis.</span></li>
+        <li><b id="ob1t">Lengkapi libur bursa</b><span id="ob1">Tempel daftar libur BEI di panel Libur bursa; weekend sudah dikecualikan otomatis.</span></li>
         <li><b>Isi tanggal swing</b><span>Masukkan minimal dua swing high dan dua swing low yang sudah terbentuk, urutan bebas.</span></li>
         <li><b>Baca hasil</b><span>Tanggal kandidat muncul di sini, terurut kronologis. Ketuk sebuah baris untuk melihat proyeksi mana saja yang mengenainya.</span></li>
       </ol>
@@ -460,6 +460,21 @@ function valid(y,m,d){const dt=mk(y,m,d);return (dt.getUTCFullYear()===y&&dt.get
 // ---------- trading calendar ----------
 let holidaySet=new Set();
 let market='ihsg'; // 'ihsg' | 'global'
+// ChronoGaze: libur bursa hanya untuk IHSG. Untuk Global, profil dari chart membawa
+// weekend yang dibaca dari data CSV (profil.weekend): ada perdagangan Sabtu dan Minggu
+// = crypto, semua hari dihitung tanpa libur; tidak ada = weekend libur. Profil Global
+// tanpa tanda itu tetap memakai tombol Sertakan weekend.
+function dataWeekend(){
+  if(market!=='global'||!profiles.global.length)return null;
+  const w=curProf().weekend;return typeof w==='boolean'?w:null;
+}
+function syncWeekendUI(){
+  const w=dataWeekend(),auto=w!==null,sw=$('#wkOn'),h=$('#wkHint');
+  if(auto)sw.checked=w;
+  sw.disabled=auto;h.hidden=!auto;
+  h.textContent=w?'Diatur dari data chart: ada perdagangan Sabtu dan Minggu (crypto), jadi semua hari dihitung tanpa hari libur.':'Diatur dari data chart: tidak ada perdagangan Sabtu dan Minggu, jadi hanya Sabtu dan Minggu yang libur. Senin sampai Jumat semuanya dihitung, tanpa libur bursa.';
+}
+function withWeekend(rec,w){if(typeof w==='boolean')rec.weekend=w;return rec;}
 function includeWeekend(){return market==='global'&&$('#wkOn').checked;}
 function isTrading(dt){
   const w=dt.getUTCDay();
@@ -560,8 +575,12 @@ function readSwings(kind){return [...document.querySelectorAll('#list-'+kind+' .
 function normSwings(arr){return (arr||[]).map(v=>typeof v==='string'?{v,on:true}:{v:v.v||'',on:v.on!==false});}
 
 // ---------- holidays ----------
+// ChronoGaze: libur IHSG diambil dari database (db/ihsg_holidays.csv) dan input
+// libur bursa disembunyikan. Textarea hanya dipakai bila halaman dibuka tanpa ChronoGaze.
+const DB_HOLIDAYS=Array.isArray(window.CHRONOGAZE_HOLIDAYS)?window.CHRONOGAZE_HOLIDAYS:null;
 function parseHolidays(){
   holidaySet=new Set();let bad=[];
+  if(DB_HOLIDAYS){DB_HOLIDAYS.forEach(v=>{const p=parseDate(String(v));if(p)holidaySet.add(key(p));});return;}
   $('#holidays').value.split(/\n/).forEach(l=>{l=l.trim();if(!l||l.startsWith('#'))return;const p=parseDate(l.split(/\s+/)[0]);if(p)holidaySet.add(key(p));else bad.push(l);});
   const ks=[...holidaySet].sort();
   $('#holStat').textContent=ks.length?ks.length+' hari libur tercatat, terakhir '+fmtShort(parseDate(ks[ks.length-1]))+(bad.length?' — '+bad.length+' baris tidak dikenali: '+bad.slice(0,3).join(', '):''):'Belum ada hari libur.';
@@ -710,14 +729,23 @@ function detailHtml(r){
 // n tanggal dengan skor tertinggi yang belum lewat (hari ini masih ikut). rows
 // sudah kronologis dan sort stabil, jadi pada skor sama tanggal lebih awal didahulukan.
 function topRows(rows,n){const tod=todayUTC();return rows.filter(r=>r.dt>=tod).sort((a,b)=>b.score-a.score).slice(0,n);}
+// ChronoGaze: Top 5 juga dikirim ke chart lewat localStorage 'cg.tg.top5'
+// ({profile, kind, dates:[{d:'YYYY-MM-DD', rank, score}]}); chart satu origin
+// dengan halaman ini dan menggambar garis vertikal untuk #1 dan tanggal terdekat.
+function publishTop5(kind,top){
+  const v=JSON.stringify({profile:curProf().name,kind:kind||'',
+    dates:(top||[]).map((r,i)=>({d:key(r.dt),rank:i+1,score:r.score}))});
+  try{if(localStorage.getItem('cg.tg.top5')!==v)localStorage.setItem('cg.tg.top5',v);}catch(e){}
+}
 function renderTop5(kind,rows,series,anchor,paired){
   const sec=$('#top5');
-  if(!kind||!rows){sec.hidden=true;return;}
+  if(!kind||!rows){sec.hidden=true;publishTop5(null,[]);return;}
   sec.hidden=false;sec.className='panel v-hasil series '+kind;
   $('#top5Title').textContent='Top 5 tanggal swing '+kind+' berikutnya';
   $('#top5-stat').textContent=(paired?'Swing terakhir adalah swing '+(kind==='high'?'low':'high')+' '+fmtShort(anchor)+', jadi yang dicari swing '+kind
     :'Baru swing '+kind+' yang diisi')+' · tanggal yang sudah lewat tidak ikut';
   const top=topRows(rows,5);const box=$('#top5-list');
+  publishTop5(kind,top);
   if(!top.length){box.innerHTML='<div class="empty">Semua tanggal proyeksi sudah lewat.</div>';return;}
   const max=top[0].score;
   let h='<table><thead><tr><th>Peringkat</th><th>Tanggal</th><th title="Jumlah bar dari swing '+kind+' terakhir">Bar</th><th>Skor</th></tr></thead><tbody>';
@@ -744,9 +772,12 @@ function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;',
 function applyMarketUI(){
   const g=market==='global';
   $('#mkIhsg').setAttribute('aria-checked',String(!g));$('#mkGlobal').setAttribute('aria-checked',String(g));
-  $('#panelHolidays').hidden=g;$('#panelWeekend').hidden=!g;
+  $('#panelHolidays').hidden=g||!!DB_HOLIDAYS;$('#panelWeekend').hidden=!g;
   $('#subIhsg').hidden=g;$('#subGlobal').hidden=!g;
-  $('#ob1').textContent=g?'Pilih apakah weekend ikut dihitung sebagai bar di panel Kalender pasar (On untuk crypto).':'Tempel daftar libur BEI di panel Libur bursa; weekend sudah dikecualikan otomatis.';
+  const n=DB_HOLIDAYS?DB_HOLIDAYS.length:0;
+  const dbTxt=n?'Libur BEI sudah tercatat di database ChronoGaze ('+n+' hari, terakhir '+fmtShort(parseDate(String(DB_HOLIDAYS[n-1])))+'); weekend dikecualikan otomatis.':'Database libur BEI masih kosong; weekend dikecualikan otomatis.';
+  $('#ob1t').textContent=g||!DB_HOLIDAYS?'Lengkapi libur bursa':'Libur bursa';
+  $('#ob1').textContent=g?'Pilih apakah weekend ikut dihitung sebagai bar di panel Kalender pasar (On untuk crypto).':DB_HOLIDAYS?dbTxt:'Tempel daftar libur BEI di panel Libur bursa; weekend sudah dikecualikan otomatis.';
   document.title="Time Geometry Calculator · "+(g?"Global":"IHSG");
 }
 function fillRows(kind,vals){const l=$('#list-'+kind);l.innerHTML='';(vals||[]).forEach(v=>addRow(kind,v));if(!l.children.length)addRow(kind,'');}
@@ -827,6 +858,7 @@ let recalcTimer=null;
 function recalcSoon(){clearTimeout(recalcTimer);recalcTimer=setTimeout(recalc,250);}
 function recalc(){
   clearTimeout(recalcTimer);
+  syncWeekendUI();
   parseHolidays();
   const sH=computeSeries('high'),sL=computeSeries('low');
   const cross=computeCross(sH,sL);
@@ -948,7 +980,7 @@ if(saved){
   if(saved.profiles&&(saved.profiles.ihsg||saved.profiles.global)){
     ['ihsg','global'].forEach(m=>{
       (saved.profiles[m]||[]).forEach(p=>profiles[m].push(
-        {name:String(p.name||defName(m)),high:normSwings(p.high),low:normSwings(p.low)}));
+        withWeekend({name:String(p.name||defName(m)),high:normSwings(p.high),low:normSwings(p.low)},p.weekend)));
     });
     if(saved.curProf){['ihsg','global'].forEach(m=>{if(isFinite(+saved.curProf[m]))cur[m]=+saved.curProf[m];});}
   }else{ // format lama: satu daftar per pasar -> jadikan satu profil
@@ -1057,7 +1089,7 @@ async function applyImport(txt){
     }
     (d.profiles[m]||[]).forEach(p=>{
       if(!p||!p.name)return;
-      const rec={name:String(p.name),high:normSwings(p.high),low:normSwings(p.low)};
+      const rec=withWeekend({name:String(p.name),high:normSwings(p.high),low:normSwings(p.low)},p.weekend);
       const i=profiles[m].findIndex(x=>x.name.toLowerCase()===rec.name.toLowerCase());
       if(i>=0){profiles[m][i]=rec;repl++;if(m===market&&jump===null)jump=i;}
       else{profiles[m].push(rec);add++;if(m===market&&jump===null)jump=profiles[m].length-1;}
@@ -1144,7 +1176,7 @@ function cgSetSelect(sel,v){
       const q=a[0];
       if(!(q.high||[]).some(x=>x.v&&x.v.trim())&&!(q.low||[]).some(x=>x.v&&x.v.trim()))a.length=0;
     }
-    const rec={name:String(SG.name),high:normSwings(set.high||[]),low:normSwings(set.low||[])};
+    const rec=withWeekend({name:String(SG.name),high:normSwings(set.high||[]),low:normSwings(set.low||[])},m==='global'?SG.weekend:undefined);
     const i=a.findIndex(x=>x.name.toLowerCase()===rec.name.toLowerCase());
     if(i>=0)a[i]=rec;else a.push(rec);
     cur[m]=i>=0?i:a.length-1;

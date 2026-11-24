@@ -37,3 +37,33 @@ def test_sideways_after_more_than_7_bars():
 def test_wide_range_is_not_sideways():
     seq = [("SH", 100, 95), ("SL", 96, 80), ("SH", 120, 96), ("SL", 97, 91)] + [("", 99, 95)] * 10
     assert set(trend_states(frame(seq))) == {NONE}
+
+
+def test_current_trend_reports_state_and_start():
+    from shared.trend import current_trend
+    pts = [("SL", 11, 9), ("SH", 21, 19), ("SL", 13, 11), ("SH", 23, 21),
+           ("SL", 15, 13), ("SH", 25, 23), ("", 24, 22), ("", 24, 22)]
+    assert current_trend(frame(pts)) == {"trend": UP, "since": "2024-01-07", "last": "2024-01-08"}
+    assert current_trend(frame(pts[:3]))["trend"] == NONE
+
+
+def test_current_trend_can_count_no_trend_as_sideways():
+    from shared.trend import current_trend
+    pts = [("SL", 11, 9), ("SH", 21, 19), ("SL", 13, 11)]
+    assert current_trend(frame(pts), none_as=SIDEWAYS) == {"trend": SIDEWAYS, "since": "2024-01-01", "last": "2024-01-03"}
+
+
+def test_stock_trend_uses_denoised_swings():
+    import numpy as np
+    from shared.swing_detector import denoised_swings
+    from shared.trend import current_trend, stock_trend
+    rng = np.random.default_rng(1)
+    close = 100 + np.cumsum(rng.normal(0.3, 2, 400))
+    df = pd.DataFrame({"Date": pd.date_range("2024-01-01", periods=400),
+                       "High": close + 1, "Low": close - 1})
+    tags = [""] * 400
+    for i, k in denoised_swings(df["High"].to_numpy(), df["Low"].to_numpy(), 3):
+        tags[i] = k
+    expected = current_trend(df.assign(Tag=tags), none_as=SIDEWAYS)
+    got = stock_trend(df)
+    assert got == expected and got["trend"] in (UP, DOWN, SIDEWAYS)

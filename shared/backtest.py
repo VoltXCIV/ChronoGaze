@@ -115,6 +115,22 @@ def retro_periods(eph: dict, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataF
     return df.sort_values("start").reset_index(drop=True)
 
 
+NEXT_MIN_PCT = 70.0          # events at or above this swing % get their next date marked
+NEXT_HORIZON_DAYS = 3 * 365  # how far ahead to look for the next occurrence
+
+
+def next_occurrences(eph: dict, events: list[str], after: pd.Timestamp,
+                     horizon_days: int = NEXT_HORIZON_DAYS) -> pd.DataFrame:
+    """First time each of `events` happens on or after the WIB date `after`.
+
+    Columns: event, kind, time (WIB), date. Events not found within
+    `horizon_days` are left out. Sorted by time."""
+    after = pd.Timestamp(after).normalize()
+    found = find_events(eph, after, after + pd.Timedelta(days=horizon_days))
+    found = found[found["event"].isin(set(events))]
+    return found.drop_duplicates("event", keep="first").reset_index(drop=True)
+
+
 # ---------------------------------------------------------------- swings
 def _calendar(tagged: pd.DataFrame):
     """Per-calendar-day arrays: has a bar, has a swing (+ the swing record)."""

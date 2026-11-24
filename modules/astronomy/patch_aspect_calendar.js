@@ -11,7 +11,10 @@
   const wrap = document.querySelector('.wrap');
   const RULES = window.CHRONOGAZE_PLANET_SIGNS || [];
   // IDX stocks and their tags ("IDX Tag" sheet); matched case-insensitively.
-  const STOCKS = (window.CHRONOGAZE_IDX || []).map(x => Object.assign({ lc: x.tags.map(t => t.toLowerCase()) }, x));
+  const STOCKS = (window.CHRONOGAZE_IDX || []).map((x, i) => Object.assign({ i, lc: x.tags.map(t => t.toLowerCase()) }, x));
+  // Current trend per code, from the daily price CSVs in data/ (shared/trend.py rules):
+  // {"AMMN": {trend: "Uptrend" | "Downtrend" | "Sideways" | "", since, last}}
+  const TRENDS = window.CHRONOGAZE_TRENDS || {};
   const EMITEN_SHOWN = 24;   // more are behind a "+N lainnya" button
   if (!A || !wrap) return;
 
@@ -102,6 +105,25 @@
     .ac-key.tA,.ac-key.tB,.ac-key.tC,.ac-key.tD{color:#1F2430;font-family:var(--mono)}
     .ac-chips .ac-more{background:none;border:1px dashed var(--line);border-radius:8px;padding:3px 9px;font-size:12px;color:var(--accent);min-height:0}
     .ac-chips .ac-rest{display:contents}
+    .ac-chips.em span[data-s]{cursor:pointer}
+    .ac-chips.em span.busy{opacity:.55;cursor:progress}
+    .ac-chips.em span[data-s]:hover{outline:2px solid var(--accent);outline-offset:1px}
+    /* hover bubble for an Emiten chip */
+    .ac-tip{position:fixed;z-index:50;width:290px;max-width:calc(100vw - 16px);box-sizing:border-box;pointer-events:none;
+      background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px 12px;
+      font-size:12.5px;line-height:1.4;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+    .ac-tip .c{font-family:var(--mono);font-size:15px;font-weight:700}
+    .ac-tip .n{color:var(--muted);font-size:11.5px;margin-bottom:6px}
+    .ac-tip .l{color:var(--muted);font-size:11px;font-weight:600;margin-top:7px;text-transform:uppercase;letter-spacing:.04em}
+    .ac-tip .tg{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}
+    .ac-tip .tg b{font-weight:500;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:11.5px}
+    .ac-tip .tg b.on{background:var(--accent-soft);border-color:var(--accent);font-weight:700}
+    .ac-tip .tg b.gold{background:linear-gradient(115deg,#A8740F 0%,#F3CF5E 22%,#FFF7D1 38%,#E9B73F 52%,#B07A12 74%,#F5D46A 100%);border-color:#8A6100;color:#2E2000;font-weight:700}
+    .ac-tip .tg b.weak{border-style:dashed;color:var(--muted)}
+    .ac-tip .tier{display:inline-block;font-family:var(--mono);font-weight:700;border-radius:6px;padding:0 7px;color:#1F2430}
+    .ac-tip .tr{font-weight:700}
+    .ac-tip .tr.t-up{color:#22a55b} .ac-tip .tr.t-down{color:#e5484d} .ac-tip .tr.t-side{color:#d29b0c} .ac-tip .tr.t-none{color:var(--muted)}
+    .ac-tip .s{color:var(--muted);font-size:11.5px}
     .ac-empty{color:var(--muted);font-size:13.5px;padding:10px 2px}
     .ac-sub{margin:-6px 0 10px;font-size:12.5px;color:var(--muted)}
     .ac-list{display:grid}
@@ -189,7 +211,7 @@
       const hit = st.tags.filter((t, i) => best.has(st.lc[i]));
       if (!hit.length) continue;
       const rank = Math.max(...hit.map(t => best.get(t.toLowerCase())));
-      out.push({ st, hit, rank });
+      out.push({ st, hit, rank, lv: hit.map(t => best.get(t.toLowerCase())) });
     }
     return out.sort((a, b) => b.rank - a.rank || a.st.tier.localeCompare(b.st.tier) ||
       b.hit.length - a.hit.length || a.st.code.localeCompare(b.st.code));
@@ -197,8 +219,9 @@
   const CLS = { 3: 'gold', 2: '', 1: 'weak' };
   function emitenChips(list) {
     // Background = liquidity tier; a gold (Mercury retrograde) chip keeps its tier as a small letter.
+    // data-s = stock index, data-h = boosted tags as "tag:level|..." for the hover bubble
     const chip = m => `<span class="${CLS[m.rank] === 'gold' ? 'gold' : `t${m.st.tier} ${CLS[m.rank]}`}" ` +
-      `title="${esc(m.st.name)} — Tier ${esc(m.st.tier)} — ${esc(m.hit.join(', '))}">${esc(m.st.code)}` +
+      `data-s="${m.st.i}" data-h="${esc(m.hit.map((t, k) => t + ':' + m.lv[k]).join('|'))}">${esc(m.st.code)}` +
       `${CLS[m.rank] === 'gold' ? `<i>${esc(m.st.tier)}</i>` : ''}</span>`;
     const head = list.slice(0, EMITEN_SHOWN).map(chip).join('');
     const rest = list.slice(EMITEN_SHOWN);
@@ -283,6 +306,78 @@
     if (!b) return;
     setDate(b.dataset.d);
     page.querySelector('.ac-one').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+
+  // ---- hover bubble on an Emiten chip: code, all its tags, boosted tags, liquidity tier, trend
+  const TIER_BG = { A: '#CFE2FA', B: '#D2F0D7', C: '#FBF0B8', D: '#F9D3D3' };
+  const TIER_TXT = { A: 'paling likuid', B: 'likuid', C: 'cukup likuid', D: 'kurang likuid' };
+  const TREND = { Uptrend: ['t-up', '▲ Uptrend'], Downtrend: ['t-down', '▼ Downtrend'], Sideways: ['t-side', '▬ Sideways'], '': ['t-none', 'Tanpa trend'] };
+  const dmy = iso => iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}` : '';
+  const tipEl = document.createElement('div');
+  tipEl.className = 'ac-tip'; tipEl.hidden = true;
+  document.body.appendChild(tipEl);
+  function tipHtml(chip) {
+    const st = STOCKS[+chip.dataset.s];
+    const lv = new Map(chip.dataset.h.split('|').filter(Boolean).map(x => { const k = x.lastIndexOf(':'); return [x.slice(0, k).toLowerCase(), +x.slice(k + 1)]; }));
+    const cls = l => l === 3 ? 'gold' : l === 1 ? 'weak' : 'on';
+    const boosted = st.tags.filter(t => lv.has(t.toLowerCase()));
+    const tr = TRENDS[st.code];
+    let trend;
+    if (!tr) trend = '<span class="s">Data harga belum ada (jalankan: python -m shared.price_store).</span>';
+    else if (tr.error) trend = '<span class="s">CSV harga tidak bisa dibaca.</span>';
+    else {
+      const [c, t] = TREND[tr.trend] || TREND[''];
+      trend = `<span class="tr ${c}">${t}</span>` + (tr.since ? ` <span class="s">sejak ${dmy(tr.since)}</span>` : '') +
+              `<div class="s">Data harga s/d ${dmy(tr.last)}${tr.src ? ` · ${esc(tr.src)}` : ''}</div>`;
+    }
+    return `<div class="c">${esc(st.code)}</div><div class="n">${esc(st.name)}</div>` +
+      `<div class="l">Tag emiten</div><div class="tg">${st.tags.map(t => `<b class="${lv.has(t.toLowerCase()) ? cls(lv.get(t.toLowerCase())) : ''}">${esc(t)}</b>`).join('')}</div>` +
+      `<div class="l">Tag yang sedang boost</div><div class="tg">${boosted.map(t => `<b class="${cls(lv.get(t.toLowerCase()))}">${esc(t)}</b>`).join('')}</div>` +
+      `<div class="l">Likuiditas</div><div><span class="tier" style="background:${TIER_BG[st.tier] || '#ddd'}">Tier ${esc(st.tier)}</span> <span class="s">${TIER_TXT[st.tier] || ''}</span></div>` +
+      `<div class="l">Trend saat ini</div><div>${trend}</div>` +
+      `<div class="s" style="margin-top:7px">Klik untuk unduh seluruh data harga ${esc(st.code)} dan jalankan Backtest.</div>`;
+  }
+  function placeTip(e) {
+    const pad = 14, w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+    let x = e.clientX + pad, y = e.clientY + pad;
+    if (x + w > innerWidth - 8) x = e.clientX - w - pad;
+    if (y + h > innerHeight - 8) y = e.clientY - h - pad;
+    tipEl.style.left = Math.max(8, x) + 'px'; tipEl.style.top = Math.max(8, y) + 'px';
+  }
+  let tipFor = null;
+  page.addEventListener('mousemove', e => {
+    const chip = e.target.closest('.ac-chips.em span[data-s]');
+    if (!chip) { if (tipFor) { tipEl.hidden = true; tipFor = null; } return; }
+    if (chip !== tipFor) { tipFor = chip; tipEl.innerHTML = tipHtml(chip); tipEl.hidden = false; }
+    placeTip(e);
+  });
+  page.addEventListener('mouseleave', () => { tipEl.hidden = true; tipFor = null; });
+  window.addEventListener('scroll', () => { tipEl.hidden = true; tipFor = null; }, true);
+
+  // ---- click on an Emiten chip: ChronoGaze downloads that stock's full price history,
+  // loads it in the chart and opens Astronomy · Backtest with a run. The page talks to
+  // Streamlit through a hidden text input in the sidebar (same origin as this iframe):
+  // it writes "CODE|nonce" and presses Enter.
+  function sendToApp(code) {
+    let doc;
+    try { doc = window.parent.document; } catch (e) { return false; }
+    const inp = doc && doc.querySelector('.st-key-cg_bridge input');
+    if (!inp) return false;
+    const setter = Object.getOwnPropertyDescriptor(inp.ownerDocument.defaultView.HTMLInputElement.prototype, 'value').set;
+    setter.call(inp, `${code}|${Date.now()}`);
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+    return true;
+  }
+  page.addEventListener('click', e => {
+    const chip = e.target.closest('.ac-chips.em span[data-s]');
+    if (!chip) return;
+    const code = STOCKS[+chip.dataset.s].code;
+    tipEl.hidden = true; tipFor = null;
+    if (sendToApp(code)) {
+      page.querySelectorAll('.ac-chips.em span.busy').forEach(x => x.classList.remove('busy'));
+      chip.classList.add('busy');
+    }
   });
 
   $('acDate').value = todayIso();

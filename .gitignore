@@ -12,3 +12,6 @@ db/backtest.sqlite
 
 # Empty nested git repo (not part of the app)
 ChronoGazeee/
+
+# Daily prices for trends, re-downloaded by shared/price_store.py
+db/prices/

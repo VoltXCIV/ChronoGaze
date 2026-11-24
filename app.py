@@ -14,13 +14,18 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-from shared.backtest import DB_PATH as BACKTEST_DB, run_backtest, save_run
+from shared.backtest import (DB_PATH as BACKTEST_DB, NEXT_MIN_PCT, next_occurrences, run_backtest,
+                             save_run)
 from shared.csv_loader import load_ohlc_csv
 from shared.ephemeris import DB_PATH as EPHEMERIS_DB, load_ephemeris
+from shared.market_holidays import load_ihsg_holidays, trades_on_weekends
+from shared.numfmt import idn, idn_styler
 from shared.moon_phases import EMOJI, load_moon_db, load_sign_sectors, nearest_bar_dates
 from shared.tag_db import load_idx_tags, load_moon_sign_tags, load_planet_sign_tags
 from shared.tg_backtest import RATIOS as TG_RATIOS, run_tg_backtest
 from shared.sun_signs import SYMBOLS as SUN_SYMBOLS, TAG_DB_PATH, load_sun_ingress_db, load_sun_sign_tags, sun_sign_segments
+from shared.price_store import PRICES_DIR, download_full_history
+from shared.trend import stock_trend
 from shared.swing_detector import (TAG_SWING_HIGH, TAG_SWING_LOW, denoised_swings, mother_candle_mask,
                                    swing_moves, tag_bars)
 
@@ -171,6 +176,33 @@ def idx_tags(mtime: float) -> list[dict]:
     return [s for s in load_idx_tags() if s["tier"]] if mtime else []
 
 
+def stock_price_files() -> dict[str, Path]:
+    """{"AMMN": Path, ...}: a daily price CSV per IDX code, from data/ ("IDX_AMMN, 1D.csv")
+    or db/prices/ ("AMMN.csv", see shared/price_store.py); the newest file wins."""
+    import re
+    found = [(re.match(r"IDX_([A-Z0-9]+), 1D\b", f.stem), f) for f in DATA_DIR.glob("IDX_*.csv")]
+    found += [(re.fullmatch(r"([A-Z0-9]+)", f.stem), f) for f in PRICES_DIR.glob("*.csv")]
+    out: dict[str, Path] = {}
+    for m, f in found:
+        if m and (m[1] not in out or f.stat().st_mtime > out[m[1]].stat().st_mtime):
+            out[m[1]] = f
+    return out
+
+
+@st.cache_data
+def _stock_trend(path: str, mtime: float) -> dict:
+    try:
+        src = "data/" if Path(path).parent == DATA_DIR else "Yahoo Finance"
+        return {**stock_trend(load_ohlc_csv(path)), "src": src}
+    except Exception:
+        return {"trend": "", "since": "", "last": "", "error": True}
+
+
+def stock_trends() -> dict[str, dict]:
+    """Current trend (shared.trend rules) per IDX code that has a daily price CSV."""
+    return {code: _stock_trend(str(f), f.stat().st_mtime) for code, f in stock_price_files().items()}
+
+
 def astronomy_view(html: str, page: str, css: str) -> str:
     """Add view CSS and the view's scripts; `page` is calendar, seeker, retrograde or calculator."""
     extra = f"<script>{ASTRO_PATCH_DATES}</script>"
@@ -182,7 +214,8 @@ def astronomy_view(html: str, page: str, css: str) -> str:
     elif page == "calendar":
         rules = json.dumps(planet_sign_tags(tag_db_mtime())).replace("</", "<\\/")
         stocks = json.dumps(idx_tags(tag_db_mtime())).replace("</", "<\\/")
-        extra += f"<script>window.CHRONOGAZE_PLANET_SIGNS={rules};window.CHRONOGAZE_IDX={stocks};{ASTRO_PATCH_ASPECT_CALENDAR}</script>"
+        trends = json.dumps(stock_trends()).replace("</", "<\\/")
+        extra += f"<script>window.CHRONOGAZE_PLANET_SIGNS={rules};window.CHRONOGAZE_IDX={stocks};window.CHRONOGAZE_TRENDS={trends};{ASTRO_PATCH_ASPECT_CALENDAR}</script>"
     else:
         sectors = json.dumps(moon_sign_tags(tag_db_mtime())).replace("</", "<\\/")
         extra += f"<script>window.CHRONOGAZE_SECTORS={sectors};{ASTRO_PATCH_MOON_SECTORS}</script>"
@@ -224,7 +257,9 @@ def swing_sets(df: pd.DataFrame) -> dict[int, list[tuple[int, str]]]:
 def time_geometry_payload(df: pd.DataFrame, name: str, market: str, last_n: int) -> dict:
     """Most recent `last_n` swing highs and lows as DD-MM-YY strings, per swing
     indicator: "sets"["1"] is the regular Swing, "sets"["N"] Denoised Swing with N candles.
-    The Time Geometry page picks the set of the indicator switched on in the chart."""
+    The Time Geometry page picks the set of the indicator switched on in the chart.
+    "weekend": the data trades on Saturdays and Sundays (crypto); the Global calendar
+    then counts every day, otherwise it skips weekends."""
     dates = df["Date"].dt.strftime("%d-%m-%y").tolist()
 
     def last(points, tag):
@@ -232,7 +267,8 @@ def time_geometry_payload(df: pd.DataFrame, name: str, market: str, last_n: int)
 
     sets = {str(p): {"high": last(pts, TAG_SWING_HIGH), "low": last(pts, TAG_SWING_LOW)}
             for p, pts in swing_sets(df).items()}
-    return {"name": f"{name} · chart", "market": market, **sets["1"], "sets": sets}
+    return {"name": f"{name} · chart", "market": market, "weekend": trades_on_weekends(df["Date"]),
+            **sets["1"], "sets": sets}
 
 
 def inject_before_first_script(html: str, payload: dict, name: str = "CHRONOGAZE_SWINGS") -> str:
@@ -350,6 +386,27 @@ def moon_records(df: pd.DataFrame) -> tuple[list[dict], list[dict]]:
     return series, markers
 
 
+def backtest_next_marks(name: str) -> list[dict]:
+    """Next dates of the strong events of this data's last backtest, for the chart:
+    [{"date": "YYYY-MM-DD", "time": "HH:MM", "event": ..., "pct": 94.7}, ...]."""
+    bt = st.session_state.get("backtest")
+    if not bt or bt["name"] != name or bt.get("next") is None:
+        return []
+    return [{"date": r.date.strftime("%Y-%m-%d"), "time": r.time.strftime("%H:%M"),
+             "event": r.event, "pct": round(float(r.pct_swing), 1)} for r in bt["next"].itertuples()]
+
+
+def strong_event_dates(summary: pd.DataFrame, min_samples: int) -> pd.DataFrame:
+    """Next occurrence (from today, WIB) of every event with swing % >= NEXT_MIN_PCT
+    and at least `min_samples` samples. Columns of next_occurrences + the event's stats."""
+    strong = summary[(summary["pct_swing"] >= NEXT_MIN_PCT) & (summary["samples"] >= min_samples)]
+    if strong.empty:
+        return pd.DataFrame(columns=["event", "kind", "time", "date", "pct_swing", "samples", "pct_high", "pct_low"])
+    today = (pd.Timestamp.utcnow().tz_localize(None) + pd.Timedelta(hours=7)).normalize()
+    nxt = next_occurrences(ephemeris(), strong["event"].tolist(), today)
+    return nxt.merge(strong[["event", "pct_swing", "samples", "pct_high", "pct_low"]], on="event")
+
+
 def render_chart(df: pd.DataFrame, title: str) -> None:
     candles, volumes = to_chart_records(df)
     # Swing indicators: bar indexes per period (1 = regular Swing), drawn by the page.
@@ -361,7 +418,7 @@ def render_chart(df: pd.DataFrame, title: str) -> None:
         {"candles": candles, "volumes": volumes, "title": title,
          "swings": swings, "mother": mother.nonzero()[0].tolist(), "denoiseMax": DENOISE_MAX,
          "moonSeries": moon_series, "moonMarkers": moon_markers,
-         "sunSegs": sun_segs, "sunInfo": sun_info}
+         "sunSegs": sun_segs, "sunInfo": sun_info, "btNext": backtest_next_marks(title)}
     ).replace("</", "<\\/")
     html = (CHART_PAGE.read_text(encoding="utf-8")
             .replace("__PAYLOAD__", payload)
@@ -407,6 +464,9 @@ def render_backtest() -> None:
         min_samples = c[4].number_input("Sampel minimal", min_value=1, max_value=1000, value=10, step=1,
                                         help="Event yang terjadi lebih sedikit dari ini tidak lolos filter.")
         go = st.form_submit_button("▶ Backtest", type="primary")
+    # a click on an Emiten in the Aspect Calendar loads that stock and runs the backtest once
+    if st.session_state.pop("bt_autorun", False):
+        go = True
     if go:
         if end <= start:
             st.error("Tanggal akhir harus setelah tanggal mulai.")
@@ -417,16 +477,41 @@ def render_backtest() -> None:
             try:
                 result = run_backtest(df, start, end, window, threshold, min_samples, eph=ephemeris())
                 run_id = save_run(result, name, st.session_state["market"])
+                nxt = strong_event_dates(result["summary"], min_samples)
             except Exception as exc:
                 st.error(f"Backtest gagal: {exc}")
                 return
-        st.session_state["backtest"] = {"name": name, "result": result, "run_id": run_id}
+        st.session_state["backtest"] = {"name": name, "result": result, "run_id": run_id, "next": nxt}
+        st.rerun()   # so the chart above draws the next event dates
     bt = st.session_state.get("backtest")
     if not bt or bt["name"] != name:
         st.caption("Atur rentang dan filter, lalu tekan **Backtest**. Hasil setiap run otomatis disimpan "
                    f"di `{BACKTEST_DB.relative_to(ROOT).as_posix()}`.")
         return
     show_backtest_report(bt["result"], bt["run_id"], name)
+    show_next_events(bt.get("next"), bt["result"]["meta"])
+
+
+def show_next_events(nxt: pd.DataFrame | None, meta: dict) -> None:
+    """Table of the next dates of the events with swing % >= NEXT_MIN_PCT (also marked on the chart)."""
+    st.markdown(f"**Tanggal kejadian berikutnya** · event dengan swing ≥ {NEXT_MIN_PCT:g}% "
+                f"dan ≥ {meta['min_samples']} sampel, ditandai ◆ di chart")
+    if nxt is None:
+        st.caption("Jalankan backtest lagi untuk menghitung tanggal kejadian berikutnya.")
+        return
+    if nxt.empty:
+        st.info(f"Tidak ada event dengan swing ≥ {NEXT_MIN_PCT:g}% pada run ini.")
+        return
+    today = (pd.Timestamp.utcnow().tz_localize(None) + pd.Timedelta(hours=7)).normalize()
+    st.dataframe(pd.DataFrame({
+        "Tanggal (WIB)": [_dmy(t, True) for t in nxt["time"]],
+        "Hari lagi": [(d - today).days for d in nxt["date"]],
+        "Event": nxt["event"], "Jenis": nxt["kind"],
+        "% Swing": [idn(x, "{:.1f}%") for x in nxt["pct_swing"]],
+        "% High / % Low": [f"{idn(h, '{:.0f}')} / {idn(l, '{:.0f}')}" for h, l in zip(nxt["pct_high"], nxt["pct_low"])],
+        "Sampel": nxt["samples"]}), hide_index=True, use_container_width=True)
+    st.caption(f"Dicari sampai {3} tahun ke depan. Chart hanya punya bar kosong ±{MOON_FUTURE_DAYS} hari ke depan, "
+               "jadi tanggal yang lebih jauh hanya ada di tabel ini.")
 
 
 def _pct_col(label: str, fmt: str = "%.1f%%", help: str | None = None):
@@ -471,7 +556,7 @@ def event_table(view: pd.DataFrame, max_height: int = 420) -> None:
                 cls = "num" + (" neg" if not missing and key.startswith("Rata") and v < 0 else
                                " pos" if not missing and key.startswith("Rata") and v > 0 else "")
                 cells.append(f'<td class="{cls}" data-v="{"" if missing else float(v)}">'
-                             f'{"—" if missing else fmt.format(v)}</td>')
+                             f'{"—" if missing else idn(v, fmt)}</td>')
             else:
                 cells.append(f'<td data-v="{escape(str(v))}">{escape(str(v))}</td>')
         body.append("<tr>" + "".join(cells) + "</tr>")
@@ -515,13 +600,13 @@ def show_backtest_report(result: dict, run_id: int, name: str) -> None:
     m, summary, hits, retro = result["meta"], result["summary"], result["hits"], result["retro"]
     st.divider()
     st.markdown(f"##### Laporan backtest · {name}")
-    st.caption(f"Run #{run_id} · {_dmy(m['start'])} – {_dmy(m['end'])} · {m['bars']:,} bar · {m['swings']:,} swing · "
+    st.caption(f"Run #{run_id} · {_dmy(m['start'])} – {_dmy(m['end'])} · {idn(m['bars'], '{:,}')} bar · {idn(m['swings'], '{:,}')} swing · "
                f"jendela ±{m['window']} hari · filter ≥{m['threshold']:g}% swing dan ≥{m['min_samples']} sampel · "
                f"tersimpan di `{BACKTEST_DB.relative_to(ROOT).as_posix()}`")
     k = st.columns(3)
-    k[0].metric("Jenis Event Astrology Diuji", f"{m['event_types']:,}")
-    k[1].metric("Event Diuji", f"{m['occurrences']:,}")
-    k[2].metric("Lolos filter", f"{m['passed']:,}")
+    k[0].metric("Jenis Event Astrology Diuji", idn(m['event_types'], "{:,}"))
+    k[1].metric("Event Diuji", idn(m['occurrences'], "{:,}"))
+    k[2].metric("Lolos filter", idn(m['passed'], "{:,}"))
 
     # ---- events
     st.markdown("**Event dengan swing ≥ filter** · aspek planet, fase bulan, stasiun Mercury/Venus")
@@ -545,7 +630,7 @@ def show_backtest_report(result: dict, run_id: int, name: str) -> None:
         occ = hits[hits["event"] == pick]
         sw_label = {TAG_SWING_HIGH: "^ Swing high", TAG_SWING_LOW: "v Swing low", "": "—"}
         # text columns so a missing value reads "—" instead of "None"
-        num = lambda x, fmt="{:,.2f}": "—" if x is None or pd.isna(x) else fmt.format(x)
+        num = lambda x, fmt="{:,.2f}": "—" if x is None or pd.isna(x) else idn(x, fmt)
         st.dataframe(pd.DataFrame({
             "Waktu event (WIB)": [_dmy(t, True) for t in occ["time"]],
             "Swing": occ["swing"].map(sw_label),
@@ -567,12 +652,12 @@ def show_backtest_report(result: dict, run_id: int, name: str) -> None:
     planets = retro["planet"].unique().tolist()
     for col, planet in zip(st.columns(len(planets)), planets):
         g = retro[retro["planet"] == planet]
-        col.metric(f"{planet} ℞ · {len(g)} periode · rata-rata perubahan", f"{g['change_pct'].mean():+.2f}%",
+        col.metric(f"{planet} ℞ · {len(g)} periode · rata-rata perubahan", idn(g['change_pct'].mean(), "{:+.2f}%"),
                    help="Rata-rata perubahan Close dari bar pertama ke bar terakhir periode retrograde.")
         col.caption(f"Naik {100 * (g['change_pct'] > 0).mean():.0f}% · turun {100 * (g['change_pct'] < 0).mean():.0f}% · "
                     f"trend berubah {100 * g['trend_changed'].mean():.0f}% periode")
     tl = lambda x: TREND_LABEL.get(x, x)
-    st.dataframe(pd.DataFrame({
+    st.dataframe(idn_styler(pd.DataFrame({
         "Planet": retro["planet"],
         "Mulai (WIB)": [_dmy(t, True) for t in retro["start"]],
         "Selesai (WIB)": [_dmy(t, True) for t in retro["end"]],
@@ -581,10 +666,8 @@ def show_backtest_report(result: dict, run_id: int, name: str) -> None:
         "Trend awal": retro["trend_start"].map(tl), "Trend akhir": retro["trend_end"].map(tl),
         "Perjalanan trend": [" → ".join(tl(x) for x in p) for p in retro["trend_path"]],
         "Trend berubah": retro["trend_changed"].map({True: "Ya", False: "Tidak"})}).iloc[::-1],
-        hide_index=True, use_container_width=True,
-        column_config={"Perubahan": _pct_col("Perubahan", "%+.2f%%"),
-                       "Close awal": st.column_config.NumberColumn(format="%.2f"),
-                       "Close akhir": st.column_config.NumberColumn(format="%.2f")})
+        {"Perubahan": "{:+.2f}%", "Close awal": "{:,.2f}", "Close akhir": "{:,.2f}"}),
+        hide_index=True, use_container_width=True)
     st.caption("Trend: Uptrend = 2× Higher High dan 2× Higher Low berturut-turut; Downtrend = 2× Lower High dan "
                "2× Lower Low; Sideways = swing high dan swing low masing-masing dalam rentang ≤3% selama lebih "
                "dari 7 bar. Trend di suatu bar hanya memakai swing yang sudah terbentuk sebelum bar itu.")
@@ -625,7 +708,7 @@ def render_tg_backtest() -> None:
     ratios = ", ".join(f"{f:g}" for f in TG_RATIOS)
     st.markdown(
         f"Backtest akan menilai **setting Calculator** untuk **{name}** ({MARKETS[market]}): "
-        f"**{len(df):,} bar**, {df['Date'].iloc[0]:%d/%m/%y} sampai {df['Date'].iloc[-1]:%d/%m/%y}, dengan "
+        f"**{idn(len(df), '{:,}')} bar**, {df['Date'].iloc[0]:%d/%m/%y} sampai {df['Date'].iloc[-1]:%d/%m/%y}, dengan "
         f"**{counts.get(TAG_SWING_HIGH, 0)} swing high** dan **{counts.get(TAG_SWING_LOW, 0)} swing low** "
         f"dari {swing_source_label(period)}.\n\n"
         "Backtest berjalan maju dari swing paling awal sampai paling akhir. Di setiap swing, proyeksi dihitung "
@@ -660,15 +743,15 @@ def apply_tg_weights(setting: dict, label: str) -> None:
 
 def show_tg_backtest(res: dict, name: str, source: str) -> None:
     m, tol, rows = res["meta"], res["tolerance"], res["rows"]
-    pct = lambda x: f"{100 * x:.2f}%"
+    pct = lambda x: idn(100 * x, "{:.2f}%")
     state = "ON" if tol["on"] else "OFF"
     st.divider()
     st.markdown(f"##### Hasil backtest · {name} · {source}")
-    st.caption(f"{m['steps']:,} swing dinilai · {_dmy(m['first'])} – {_dmy(m['last'])}")
+    st.caption(f"{idn(m['steps'], '{:,}')} swing dinilai · {_dmy(m['first'])} – {_dmy(m['last'])}")
     st.markdown(
-        f"**±1 hari: {state}.** Tanggal proyeksi yang tepat kena {tol['exact_hits']:,} dari "
-        f"{tol['exact_dates']:,} tanggal ({pct(tol['exact_rate'])}); tanggal 1 bar di sebelahnya kena "
-        f"{tol['near_hits']:,} dari {tol['near_dates']:,} tanggal ({pct(tol['near_rate'])}). "
+        f"**±1 hari: {state}.** Tanggal proyeksi yang tepat kena {idn(tol['exact_hits'], '{:,}')} dari "
+        f"{idn(tol['exact_dates'], '{:,}')} tanggal ({pct(tol['exact_rate'])}); tanggal 1 bar di sebelahnya kena "
+        f"{idn(tol['near_hits'], '{:,}')} dari {idn(tol['near_dates'], '{:,}')} tanggal ({pct(tol['near_rate'])}). "
         + ("Tanggal di sebelahnya lebih sering kena, jadi proyeksi yang meleset 1 bar ikut mendapat poin."
            if tol["on"] else
            "Tanggal di sebelahnya tidak lebih sering kena, jadi hanya proyeksi yang tepat yang mendapat poin."))
@@ -678,10 +761,10 @@ def show_tg_backtest(res: dict, name: str, source: str) -> None:
         "Poin": [r["hits"] for r in rows],
         "Proyeksi": [r["projections"] for r in rows],
         "Kena %": [100 * r["rate"] for r in rows]})
-    st.dataframe(table, hide_index=True, use_container_width=True, height=35 * (len(table) + 1) + 3,
+    st.dataframe(idn_styler(table, {"Kena %": "{:.2f}%", "Poin": "{:,}", "Proyeksi": "{:,}"}),
+                 hide_index=True, use_container_width=True, height=35 * (len(table) + 1) + 3,
                  column_config={
-                     "Bobot": st.column_config.ProgressColumn(min_value=0, max_value=1, format="%.3f"),
-                     "Kena %": st.column_config.NumberColumn(format="%.2f%%")})
+                     "Bobot": st.column_config.ProgressColumn(min_value=0, max_value=1, format="%.3f")})
     hit = "tepat atau meleset 1 bar" if tol["on"] else "tepat"
     st.caption(
         f"**Poin** = berapa kali proyeksi var F itu jatuh {hit} di swing berikutnya. **Proyeksi** = berapa kali "
@@ -799,12 +882,41 @@ def nav_tree() -> tuple[str, str, str]:
     return tool, sel, next(child for child, v in items if v == sel)
 
 
+def open_stock_from_calendar() -> None:
+    """Callback of the hidden bridge input. A click on an Emiten chip in the Aspect
+    Calendar writes "CODE|nonce" into it: download that stock's full daily history
+    from Yahoo Finance, load it as the chart data, open Astronomy · Backtest and run it."""
+    import re
+    code = str(st.session_state.get("cg_bridge_in", "")).split("|")[0].strip().upper()
+    if not re.fullmatch(r"[A-Z0-9]{2,8}", code):
+        return
+    try:
+        with st.spinner(f"Mengunduh seluruh data harga {code} dari Yahoo Finance…"):
+            path = download_full_history(code, DATA_DIR)
+            tagged = tag_bars(load_ohlc_csv(path))
+        CACHE_DIR.mkdir(exist_ok=True)
+        tagged.to_csv(CACHE_DIR / f"{path.stem}_tags.csv", index=False)
+    except Exception as exc:
+        st.session_state["error"] = f"Gagal download **{code}** dari Yahoo Finance: {exc}"
+        return
+    st.session_state.update(df=tagged, name=path.stem, market="ihsg", nav_sel="backtest",
+                            nav_open_astro=True, bt_autorun=True)
+    st.session_state.pop("error", None)
+
+
+BRIDGE_CSS = "<style>.st-key-cg_bridge { display:none !important; }</style>"
+
+
 # Data loaded before the market choice existed: make the user load it again
 # rather than guess its market.
 if "df" in st.session_state and "market" not in st.session_state:
     del st.session_state["df"]
 
 with st.sidebar:
+    st.markdown(BRIDGE_CSS, unsafe_allow_html=True)
+    with st.container(key="cg_bridge"):
+        st.text_input("bridge", key="cg_bridge_in", on_change=open_stock_from_calendar,
+                      label_visibility="collapsed")
     loaded = "df" in st.session_state
     with st.expander("📂 Load Data", expanded=not loaded):
         load_data_menu()
@@ -816,7 +928,7 @@ with st.sidebar:
         df = st.session_state["df"]
         counts = df["Tag"].value_counts()
         st.markdown(f"**{st.session_state['name']}** · {MARKETS[st.session_state['market']]}")
-        st.caption(f"{len(df):,} bar · {df['Date'].iloc[0]:%d/%m/%y} → {df['Date'].iloc[-1]:%d/%m/%y}  \n"
+        st.caption(f"{idn(len(df), '{:,}')} bar · {df['Date'].iloc[0]:%d/%m/%y} → {df['Date'].iloc[-1]:%d/%m/%y}  \n"
                    f"^ {counts.get(TAG_SWING_HIGH, 0)} swing high · v {counts.get(TAG_SWING_LOW, 0)} swing low")
 
     st.divider()
@@ -831,7 +943,10 @@ else:
     df = st.session_state["df"]
     render_chart(df, st.session_state["name"])
     with st.expander("Lihat data tabel"):
-        st.dataframe(df.drop(columns="Tag").iloc[::-1], use_container_width=True, hide_index=True)
+        prices = {c: "{:,.2f}" for c in ("Open", "High", "Low", "Close")}
+        st.dataframe(idn_styler(df.drop(columns="Tag").iloc[::-1], {**prices, "Volume": "{:,.0f}"}),
+                     use_container_width=True, hide_index=True,
+                     column_config={"Date": st.column_config.DatetimeColumn(format="DD/MM/YY")})
 
 # ---------------------------------------------------------------- chosen tool
 st.divider()
@@ -843,6 +958,8 @@ elif not page.exists():
     st.error(f"File tidak ditemukan: `{page}`")
 elif page == TIME_GEOMETRY_PAGE:
     html = page.read_text(encoding="utf-8")
+    # IHSG holidays come from db/ihsg_holidays.csv; the page has no holiday input.
+    html = inject_before_first_script(html, load_ihsg_holidays(), "CHRONOGAZE_HOLIDAYS")
     weights = st.session_state.get("tg_weights")
     if weights:
         html = inject_before_first_script(html, weights, "CHRONOGAZE_WEIGHTS")
@@ -857,10 +974,17 @@ elif page == TIME_GEOMETRY_PAGE:
             market = st.session_state["market"]
             payload = time_geometry_payload(df, st.session_state["name"], market, TG_LAST_N)
             html = inject_before_first_script(html, payload)
+            if market == "global":
+                calendar = (" Data ini ada perdagangan Sabtu dan Minggu (crypto), jadi semua hari dihitung "
+                            "tanpa hari libur." if payload["weekend"] else
+                            " Data ini tidak ada perdagangan Sabtu dan Minggu, jadi hanya Sabtu dan Minggu "
+                            "yang libur; Senin sampai Jumat semuanya dihitung, tanpa libur bursa.")
+            else:
+                calendar = " Kalender IHSG: weekend dan libur BEI dari database dilewati."
             st.caption(f"{TG_LAST_N} swing high dan {TG_LAST_N} swing low terakhir sudah diisi ke "
                        f"profil **{payload['name']}** (pasar {MARKETS[market]}), dari indikator swing "
                        "yang sedang aktif di chart (Swing atau Denoised Swing). Profil ini ditimpa "
-                       "ulang setiap kali data di-load atau indikator swing diubah.")
+                       "ulang setiap kali data di-load atau indikator swing diubah." + calendar)
         else:
             st.caption("Data intraday: swing tidak dikirim ke Time Geometry (alat ini memakai tanggal harian).")
     components.html(html, height=TOOL_HEIGHT, scrolling=True)

@@ -62,3 +62,12 @@ def test_run_and_save(tmp_path):
     with sqlite3.connect(tmp_path / "bt.sqlite") as con:
         assert con.execute("select count(*) from event_stats where run_id=?", (rid,)).fetchone()[0] == len(r["summary"])
         assert con.execute("select dataset from runs").fetchone()[0] == "TEST"
+
+
+def test_next_occurrences_gives_first_date_after():
+    from shared.backtest import next_occurrences
+    eph = load_ephemeris()
+    nx = next_occurrences(eph, ["Full Moon", "Mercury station direct", "No Such Event"], pd.Timestamp("2024-01-01"))
+    assert list(nx.event) == ["Mercury station direct", "Full Moon"]          # sorted by time
+    assert nx.date.iloc[0] == pd.Timestamp("2024-01-02")
+    assert abs(nx.time.iloc[1] - pd.Timestamp("2024-01-26 00:54")) < pd.Timedelta(minutes=5)
