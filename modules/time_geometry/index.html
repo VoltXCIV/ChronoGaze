@@ -140,6 +140,8 @@ button.danger:hover{background:var(--red-soft);border-color:var(--red)}
 .series.high .intervals .chip{border-color:var(--red)}
 .series.low .intervals .chip{border-color:var(--yel)}
 .chip.cross{border-style:dashed;background:var(--panel2)}
+/* ChronoGaze: daftar interval antar swing disembunyikan; tetap dihitung, hanya tidak ditampilkan */
+.intervals{display:none !important}
 
 /* ---------- results ---------- */
 .stats{font-size:12.5px;color:var(--muted);margin-bottom:8px}
@@ -328,14 +330,15 @@ td.score{width:1%}
         </div>
       </details>
 
-      <details class="group" open>
-        <summary><span class="gh">Interval lama<button type="button" class="info" data-tip="Interval terbaru selalu mendapat poin penuh. Bila dipilih menurun, setiap interval yang lebih lama dikalikan faktor ini sekali lagi: interval kedua terbaru ×0.8, ketiga ×0.64, dan seterusnya." aria-label="Keterangan" aria-expanded="false">i</button></span></summary>
+      <!-- ChronoGaze: interval lama tidak dibedakan dari interval baru (bobotnya sudah lewat var F), jadi pilihan ini disembunyikan dan project() memakai 1 -->
+      <details class="group" open hidden>
+        <summary><span class="gh">Interval lama<button type="button" class="info" data-tip="Interval dihitung dari setiap pasangan swing (SH1→SH2, SH1→SH3, SH2→SH3, …). Interval yang berakhir di swing terakhir selalu mendapat poin penuh. Bila dipilih menurun, bobot dikalikan faktor ini sekali untuk tiap swing sesudah ujung interval: berakhir di swing kedua terakhir ×0.8, ketiga terakhir ×0.64, dan seterusnya." aria-label="Keterangan" aria-expanded="false">i</button></span></summary>
         <div class="gbody">
           <label for="recency">Poin untuk interval yang lebih lama</label>
           <select id="recency">
             <option value="1">Sama dengan interval terbaru</option>
-            <option value="0.8">Menurun ×0.8 tiap interval ke belakang</option>
-            <option value="0.6">Menurun ×0.6 tiap interval ke belakang</option>
+            <option value="0.8">Menurun ×0.8 tiap swing ke belakang</option>
+            <option value="0.6">Menurun ×0.6 tiap swing ke belakang</option>
           </select>
         </div>
       </details>
@@ -373,14 +376,21 @@ td.score{width:1%}
       </ol>
     </section>
 
+    <!-- ChronoGaze: 5 tanggal dengan skor tertinggi yang belum lewat, untuk swing yang sedang dicari -->
+    <section class="panel v-hasil series high" id="top5" hidden>
+      <h2 class="gh"><span id="top5Title">Top 5 tanggal</span><button type="button" class="info" data-tip="Lima tanggal dengan skor tertinggi dari tabel proyeksi di bawah, untuk swing yang sedang dicari: bila swing terakhir adalah swing low, yang dicari swing high, dan sebaliknya. Tanggal yang sudah lewat tidak ikut. Bila skornya sama, tanggal yang lebih awal didahulukan. Ketuk atau klik baris untuk melihat rinciannya." aria-label="Keterangan" aria-expanded="false">i</button></h2>
+      <div class="stats" id="top5-stat"></div>
+      <div class="tblwrap" id="top5-list"></div>
+    </section>
+
     <div class="two v-hasil" id="results">
       <section class="panel series high">
-        <h2 class="gh">Proyeksi swing high berikutnya<button type="button" class="info" data-tip="Tanggal kandidat diurutkan kronologis. Skor adalah jumlah poin dari proyeksi yang mengenai tanggal itu. Bila beberapa rasio dari interval yang SAMA membulat ke bar yang sama, hanya poin tertinggi yang dihitung dan sisanya ditandai &quot;lebur&quot;; proyeksi dari interval berbeda tetap dijumlahkan. #1–#3 menandai skor tertinggi. Ketuk atau klik baris untuk melihat rinciannya. Proyeksi dihitung sejak swing terakhir yang diinput, jadi tanggal yang sudah lewat ikut tampil: ditandai &quot;lewat&quot;, diredupkan, dan dipisahkan garis bertuliskan hari ini." aria-label="Keterangan" aria-expanded="false">i</button></h2>
+        <h2 class="gh">Proyeksi swing high berikutnya<button type="button" class="info" data-tip="Tanggal kandidat diurutkan kronologis. Skor adalah jumlah poin dari proyeksi yang mengenai tanggal itu. Bila beberapa rasio dari interval yang SAMA membulat ke bar yang sama, hanya poin tertinggi yang dihitung dan sisanya ditandai &quot;lebur&quot;; proyeksi dari interval berbeda tetap dijumlahkan. #1–#5 menandai lima tanggal dengan skor tertinggi yang belum lewat, sama dengan daftar Top 5. Ketuk atau klik baris untuk melihat rinciannya. Proyeksi dihitung sejak swing terakhir yang diinput, jadi tanggal yang sudah lewat ikut tampil: ditandai &quot;lewat&quot;, diredupkan, dan dipisahkan garis bertuliskan hari ini." aria-label="Keterangan" aria-expanded="false">i</button></h2>
         <div class="stats" id="stat-high"></div>
         <div class="tblwrap" id="res-high"></div>
       </section>
       <section class="panel series low">
-        <h2 class="gh">Proyeksi swing low berikutnya<button type="button" class="info" data-tip="Tanggal kandidat diurutkan kronologis. Skor adalah jumlah poin dari proyeksi yang mengenai tanggal itu. Bila beberapa rasio dari interval yang SAMA membulat ke bar yang sama, hanya poin tertinggi yang dihitung dan sisanya ditandai &quot;lebur&quot;; proyeksi dari interval berbeda tetap dijumlahkan. #1–#3 menandai skor tertinggi. Ketuk atau klik baris untuk melihat rinciannya. Proyeksi dihitung sejak swing terakhir yang diinput, jadi tanggal yang sudah lewat ikut tampil: ditandai &quot;lewat&quot;, diredupkan, dan dipisahkan garis bertuliskan hari ini." aria-label="Keterangan" aria-expanded="false">i</button></h2>
+        <h2 class="gh">Proyeksi swing low berikutnya<button type="button" class="info" data-tip="Tanggal kandidat diurutkan kronologis. Skor adalah jumlah poin dari proyeksi yang mengenai tanggal itu. Bila beberapa rasio dari interval yang SAMA membulat ke bar yang sama, hanya poin tertinggi yang dihitung dan sisanya ditandai &quot;lebur&quot;; proyeksi dari interval berbeda tetap dijumlahkan. #1–#5 menandai lima tanggal dengan skor tertinggi yang belum lewat, sama dengan daftar Top 5. Ketuk atau klik baris untuk melihat rinciannya. Proyeksi dihitung sejak swing terakhir yang diinput, jadi tanggal yang sudah lewat ikut tampil: ditandai &quot;lewat&quot;, diredupkan, dan dipisahkan garis bertuliskan hari ini." aria-label="Keterangan" aria-expanded="false">i</button></h2>
         <div class="stats" id="stat-low"></div>
         <div class="tblwrap" id="res-low"></div>
       </section>
@@ -577,13 +587,18 @@ function computeSeries(kind){
   if(errs.length){msg.innerHTML=msgBox('err',errs.map(e=>esc(e)).join('<br>'));return null;}
   if(!dates.length)return null;
   if(dates.length<2)msg.innerHTML=msgBox('info','Butuh minimal 2 tanggal aktif untuk menghitung interval.');
-  const intervals=[];
   for(let k=1;k<dates.length;k++){
     const d=barsBetween(dates[k-1].p,dates[k].p);
     if(d<2){errs.push('Jarak '+fmtShort(dates[k-1].p)+' → '+fmtShort(dates[k].p)+' hanya '+d+' bar. Dua swing sejenis tidak mungkin berjarak kurang dari 2 bar.');inputs[dates[k].i].classList.add('bad');}
-    intervals.push({from:dates[k-1].p,to:dates[k].p,d});
   }
   if(errs.length){msg.innerHTML=msgBox('err',errs.map(e=>esc(e)).join('<br>'));return null;}
+  // ChronoGaze: interval dari SETIAP pasangan swing, bukan hanya yang berurutan.
+  // SH1→SH2, SH1→SH3, SH1→SH4, SH2→SH3, SH2→SH4, SH3→SH4.
+  // `age` = jumlah swing sesudah ujung interval (0 = berakhir di swing terakhir),
+  // dipakai untuk bobot kebaruan.
+  const intervals=[];
+  for(let a=0;a<dates.length-1;a++)for(let b=a+1;b<dates.length;b++)
+    intervals.push({from:dates[a].p,to:dates[b].p,d:barsBetween(dates[a].p,dates[b].p),age:dates.length-1-b});
   intBox.innerHTML=intervals.map(iv=>'<span class="chip">'+fmtShort(iv.from)+' → '+fmtShort(iv.to)+' = '+iv.d+' bar</span>').join('');
   return {last:dates[dates.length-1].p,intervals};
 }
@@ -602,7 +617,8 @@ function computeCross(sH,sL){
 
 function project(series,cross,anchor){
   const fs=fModel.filter(x=>x.on).map(x=>({f:x.f,w:x.w||0}));
-  const tolOn=$('#tolOn').checked;const tolW=+$('#tolW').value;const rec=+$('#recency').value;
+  const tolOn=$('#tolOn').checked;const tolW=+$('#tolW').value;
+  const rec=1; // ChronoGaze: interval lama dihitung sama dengan interval terbaru (pilihan "Interval lama" disembunyikan)
   const offsets=tolOn?[[0,1],[-1,tolW],[1,tolW]]:[[0,1]];
   // Acuan bersama: tanggal swing paling akhir dari SELURUH input, high maupun
   // low. Kedua tabel mulai dari tanggal yang sama, supaya bisa dibandingkan
@@ -610,7 +626,6 @@ function project(series,cross,anchor){
   // yang dibatasi hanya apa yang ditampilkan. Tanggal lampau ditandai, bukan
   // disembunyikan, supaya hasilnya bisa dipakai untuk backtest.
   const t0=anchor||series.last;
-  const n=series.intervals.length;
   const hits=new Map(); // key -> {dt, score, items[]}
   const caches=new Map();
   const barAt=(origin,b)=>{const ok=key(origin);if(!caches.has(ok))caches.set(ok,new Map());const c=caches.get(ok);if(!c.has(b))c.set(b,addBars(origin,b));return c.get(b);};
@@ -649,7 +664,9 @@ function project(series,cross,anchor){
   // tolaknya B. Interval lama tetap bisa menyumbang proyeksi ke masa depan
   // lewat pengali besar; yang landing di masa yang sudah diketahui tersaring
   // sendiri oleh acuan t0.
-  series.intervals.forEach((iv,idx)=>addInterval(iv,iv.to,Math.pow(rec,n-1-idx),{}));
+  // Bobot kebaruan: interval yang berakhir di swing terakhir bernilai penuh,
+  // tiap swing sesudah ujungnya mengalikan bobot dengan rasio kebaruan.
+  series.intervals.forEach(iv=>addInterval(iv,iv.to,Math.pow(rec,iv.age),{}));
   if(cross)addInterval(cross,cross.origin,cross.w,{cross:cross.label}); // jarak silang = interval terbaru, bobot penuh × pengali silang
   return [...hits.values()].sort((a,b)=>a.dt-b.dt);
 }
@@ -661,7 +678,7 @@ function renderTable(kind,rows,series,cross,anchor){
   if(!rows){box.innerHTML='<div class="empty">Isi tanggal swing '+kind+' untuk melihat proyeksi.</div>';st.textContent='';return;}
   if(!rows.length){box.innerHTML='<div class="empty">Semua proyeksi dari input ini sudah lewat.</div>';st.textContent='';return;}
   const max=Math.max(...rows.map(r=>r.score));
-  const sorted=[...rows].sort((a,b)=>b.score-a.score);const rank=new Map();sorted.slice(0,3).forEach((r,i)=>rank.set(key(r.dt),i+1));
+  const rank=new Map();topRows(rows,5).forEach((r,i)=>rank.set(key(r.dt),i+1));
   const nI=series.intervals.length;
   const nPast=rows.filter(r=>r.dt<todayUTC()).length;
   st.textContent=(nI?nI+' interval '+kind+'-ke-'+kind:'Tanpa interval sejenis')+(cross?' + jarak silang '+cross.label+' '+cross.d+' bar':'')+' · acuan '+fmtShort(anchor||series.last)+(anchor&&anchor.getTime()!==series.last.getTime()?' (swing '+kind+' terakhir '+fmtShort(series.last)+')':'')+' · '+rows.length+' tanggal kandidat'+(nPast?' ('+nPast+' sudah lewat)':'')+', skor tertinggi '+fmt(max);
@@ -673,15 +690,44 @@ function renderTable(kind,rows,series,cross,anchor){
     const rk=rank.get(key(r.dt));
     const past=r.dt<tod;
     if(!past&&!nlDone){nlDone=true;if(rows[0].dt<tod)h+='<tr class="nowline"><td colspan="3"><div class="nl">hari ini</div></td></tr>';}
-    const det=r.items.map(it=>'<span class="'+(it.lost?'lost':'')+'">'
-      +(it.cross?'<span class="cx">'+it.cross+'</span> ':'')
-      +it.d+' bar ('+fmtShort(it.from)+'→'+fmtShort(it.to)+') × '+it.f+' = '+it.bars+' bar'
-      +(it.off?', ±1':', tepat')+' &nbsp;'
-      +(it.lost?'lebur, tidak dihitung':'+'+fmt(it.pts)+' poin')+'</span>').join('<br>');
+    const det=detailHtml(r);
     h+='<tr class="hit'+(past?' past':'')+'" tabindex="0" role="button" aria-expanded="'+open+'" data-k="'+esc(k)+'"><td class="mono">'+fmtShort(r.dt)+'<span class="dow">'+DOW[r.dt.getUTCDay()]+', '+r.dt.getUTCDate()+' '+MON[r.dt.getUTCMonth()]+'</span></td>'+
        '<td class="mono">'+bars+'</td>'+
        '<td class="score"><div class="meter"><span class="bar" style="width:'+Math.max(2,Math.round(r.score/max*64))+'px"></span><span class="mono">'+fmt(r.score)+'</span>'+(rk?'<span class="rank">#'+rk+'</span>':'')+'<span class="hint" style="margin:0">'+r.items.filter(x=>!x.lost).length+' hit</span></div></td></tr>'+
        '<tr class="detail"'+(open?'':' hidden')+'><td colspan="3">'+det+'</td></tr>';
+  });
+  box.innerHTML=h+'</tbody></table>';
+}
+function detailHtml(r){
+  return r.items.map(it=>'<span class="'+(it.lost?'lost':'')+'">'
+    +(it.cross?'<span class="cx">'+it.cross+'</span> ':'')
+    +it.d+' bar ('+fmtShort(it.from)+'→'+fmtShort(it.to)+') × '+it.f+' = '+it.bars+' bar'
+    +(it.off?', ±1':', tepat')+' &nbsp;'
+    +(it.lost?'lebur, tidak dihitung':'+'+fmt(it.pts)+' poin')+'</span>').join('<br>');
+}
+
+// ---------- ChronoGaze: Top 5 ----------
+// n tanggal dengan skor tertinggi yang belum lewat (hari ini masih ikut). rows
+// sudah kronologis dan sort stabil, jadi pada skor sama tanggal lebih awal didahulukan.
+function topRows(rows,n){const tod=todayUTC();return rows.filter(r=>r.dt>=tod).sort((a,b)=>b.score-a.score).slice(0,n);}
+function renderTop5(kind,rows,series,anchor,paired){
+  const sec=$('#top5');
+  if(!kind||!rows){sec.hidden=true;return;}
+  sec.hidden=false;sec.className='panel v-hasil series '+kind;
+  $('#top5Title').textContent='Top 5 tanggal swing '+kind+' berikutnya';
+  $('#top5-stat').textContent=(paired?'Swing terakhir adalah swing '+(kind==='high'?'low':'high')+' '+fmtShort(anchor)+', jadi yang dicari swing '+kind
+    :'Baru swing '+kind+' yang diisi')+' · tanggal yang sudah lewat tidak ikut';
+  const top=topRows(rows,5);const box=$('#top5-list');
+  if(!top.length){box.innerHTML='<div class="empty">Semua tanggal proyeksi sudah lewat.</div>';return;}
+  const max=top[0].score;
+  let h='<table><thead><tr><th>Peringkat</th><th>Tanggal</th><th title="Jumlah bar dari swing '+kind+' terakhir">Bar</th><th>Skor</th></tr></thead><tbody>';
+  top.forEach((r,i)=>{
+    const k='top5:'+kind+':'+key(r.dt);const open=openDetails.has(k);
+    h+='<tr class="hit" tabindex="0" role="button" aria-expanded="'+open+'" data-k="'+esc(k)+'"><td><span class="rank">#'+(i+1)+'</span></td>'+
+       '<td class="mono">'+fmtShort(r.dt)+'<span class="dow">'+DOW[r.dt.getUTCDay()]+', '+r.dt.getUTCDate()+' '+MON[r.dt.getUTCMonth()]+'</span></td>'+
+       '<td class="mono">'+barsBetween(series.last,r.dt)+'</td>'+
+       '<td class="score"><div class="meter"><span class="bar" style="width:'+Math.max(2,Math.round(r.score/max*64))+'px"></span><span class="mono">'+fmt(r.score)+'</span><span class="hint" style="margin:0">'+r.items.filter(x=>!x.lost).length+' hit</span></div></td></tr>'+
+       '<tr class="detail"'+(open?'':' hidden')+'><td colspan="4">'+detailHtml(r)+'</td></tr>';
   });
   box.innerHTML=h+'</tbody></table>';
 }
@@ -795,8 +841,17 @@ function recalc(){
   if(sH&&sL)anchor=sH.last>sL.last?sH.last:sL.last;
   else if(sH)anchor=sH.last; else if(sL)anchor=sL.last;
   const cH=cross&&cross.target==='high'?cross:null, cL=cross&&cross.target==='low'?cross:null;
-  renderTable('high',sH?project(sH,cH,anchor):null,sH,cH,anchor);
-  renderTable('low',sL?project(sL,cL,anchor):null,sL,cL,anchor);
+  // ChronoGaze: hanya swing yang sedang dicari yang ditampilkan. Swing terakhir
+  // low -> yang dicari swing high, dan sebaliknya. Bila baru satu jenis yang
+  // diisi, jenis itu yang ditampilkan; bila keduanya bertanggal sama, keduanya.
+  const seek=sH&&sL?(sL.last>sH.last?'high':sH.last>sL.last?'low':null):sH?'high':sL?'low':null;
+  $('#res-high').closest('section').hidden=seek==='low';
+  $('#res-low').closest('section').hidden=seek==='high';
+  const rowsH=sH&&seek!=='low'?project(sH,cH,anchor):null;
+  const rowsL=sL&&seek!=='high'?project(sL,cL,anchor):null;
+  if(seek!=='low')renderTable('high',rowsH,sH,cH,anchor);
+  if(seek!=='high')renderTable('low',rowsL,sL,cL,anchor);
+  renderTop5(seek,seek==='high'?rowsH:seek==='low'?rowsL:null,seek==='high'?sH:sL,anchor,!!(sH&&sL));
   saveState();
 }
 
@@ -907,7 +962,7 @@ if(saved){
   }
   if(saved.market==='global')market='global';
   $('#wkOn').checked=!!saved.wkOn;
-  if(saved.tolW)$('#tolW').value=saved.tolW;if(saved.recency)$('#recency').value=saved.recency;
+  if(saved.tolW)cgSetSelect('#tolW',saved.tolW);if(saved.recency)cgSetSelect('#recency',saved.recency);
   if(typeof saved.tolOn==='boolean')$('#tolOn').checked=saved.tolOn;
   if(typeof saved.crossOn==='boolean')$('#crossOn').checked=saved.crossOn;
   if(saved.crossW!==undefined&&saved.crossW!=='')$('#crossW').value=saved.crossW;
@@ -1022,27 +1077,85 @@ $('#crossW').addEventListener('input',recalcSoon);
 function syncTol(){$('#tolW').disabled=!$('#tolOn').checked;}
 $('#tolOn').addEventListener('change',()=>{syncTol();recalc();});syncTol();
 
+// ---------- ChronoGaze: pilihan hasil backtest ----------
+// Pilih nilai di <select>; nilai yang bukan pilihan bawaan (misalnya 0.734 dari
+// Backtest) ditambahkan sebagai pilihan baru.
+function cgSetSelect(sel,v){
+  const el=$(sel);v=String(v);
+  if(![...el.options].some(o=>o.value===v)){
+    const o=document.createElement('option');o.value=v;
+    o.textContent=sel==='#tolW'?v+' poin (hasil backtest)':'Menurun ×'+v+' tiap swing ke belakang (hasil backtest)';
+    el.append(o);
+  }
+  el.value=v;
+}
+
+// ---------- ChronoGaze: bobot dari Backtest ----------
+// ChronoGaze menyisipkan window.CHRONOGAZE_WEIGHTS = {id, ratios:{"0.5":w,...},
+// tolOn, cross} saat tombol "Terapkan ke Calculator" di halaman Backtest diklik.
+// Diterapkan sekali per id, jadi perubahan manual sesudahnya tidak ditimpa.
+// Bobot 0 mematikan var F / faktor silang; nilai null dibiarkan. Poin untuk
+// tanggal ±1 bar dan interval lama tidak dinilai backtest, jadi tidak diubah.
+(function(){
+  const W=window.CHRONOGAZE_WEIGHTS;
+  if(!W||!W.id)return;
+  const KEY='cg.tgweights.applied';
+  let done=null;try{done=localStorage.getItem(KEY);}catch(e){}
+  if(done===W.id)return;
+  const ratios=W.ratios||{};
+  buildF(fModel.map(x=>{
+    const w=ratios[String(x.f)];
+    return w==null?{f:x.f,on:x.on,w:x.w}:{f:x.f,on:w>0,w};
+  }),F_VER);
+  if(typeof W.tolOn==='boolean')$('#tolOn').checked=W.tolOn;
+  if(W.cross!=null){$('#crossOn').checked=W.cross>0;if(W.cross>0)$('#crossW').value=W.cross;}
+  $('#crossW').disabled=!$('#crossOn').checked;syncTol();
+  try{localStorage.setItem(KEY,W.id);}catch(e){}
+  saveState();
+})();
+
 // ---------- ChronoGaze: swing dari chart ----------
-// ChronoGaze menyisipkan window.CHRONOGAZE_SWINGS = {name, market, high:[DD-MM-YY], low:[...]}
-// sebelum skrip ini jalan. Isinya ditulis ke profil bernama `name` (dibuat
-// bila belum ada, ditimpa bila sudah ada), lalu profil itu dibuka. Profil lain
-// tidak disentuh.
+// ChronoGaze menyisipkan window.CHRONOGAZE_SWINGS = {name, market, high, low,
+// sets:{"1":{high,low}, "2":{...}, ...}} (tanggal DD-MM-YY) sebelum skrip ini jalan.
+// sets["1"] = indikator Swing biasa, sets["N"] = Denoised Swing dengan N candle.
+// Set yang dipakai mengikuti indikator yang aktif di chart (localStorage
+// 'cg.ind.dswing' dan 'cg.denoise.n'); saat indikator diubah, isinya diisi ulang.
+// Isinya ditulis ke profil bernama `name` (dibuat bila belum ada, ditimpa bila
+// sudah ada), lalu profil itu dibuka. Profil lain tidak disentuh.
 (function(){
   const SG=window.CHRONOGAZE_SWINGS;
   if(!SG||!SG.name)return;
-  const m=SG.market==='global'?'global':'ihsg';
-  stash();
-  if(m!==market){market=m;applyMarketUI();}
-  const a=profiles[m];
-  if(a.length===1){ // buang profil bawaan yang masih kosong
-    const q=a[0];
-    if(!(q.high||[]).some(x=>x.v&&x.v.trim())&&!(q.low||[]).some(x=>x.v&&x.v.trim()))a.length=0;
+  const ls=k=>{try{return localStorage.getItem(k);}catch(e){return null;}};
+  function chosen(){
+    if(!SG.sets)return SG;
+    const n=ls('cg.ind.dswing')==='1'?String(parseInt(ls('cg.denoise.n'),10)||1):'1';
+    return SG.sets[n]||SG.sets['1'];
   }
-  const rec={name:String(SG.name),high:normSwings(SG.high||[]),low:normSwings(SG.low||[])};
-  const i=a.findIndex(x=>x.name.toLowerCase()===rec.name.toLowerCase());
-  if(i>=0)a[i]=rec;else a.push(rec);
-  cur[m]=i>=0?i:a.length-1;
-  loadProfileIntoForm();saveState();
+  let last='';
+  function fill(){
+    const set=chosen(), key=JSON.stringify(set);
+    if(key===last)return false;
+    last=key;
+    const m=SG.market==='global'?'global':'ihsg';
+    stash();
+    if(m!==market){market=m;applyMarketUI();}
+    const a=profiles[m];
+    if(a.length===1){ // buang profil bawaan yang masih kosong
+      const q=a[0];
+      if(!(q.high||[]).some(x=>x.v&&x.v.trim())&&!(q.low||[]).some(x=>x.v&&x.v.trim()))a.length=0;
+    }
+    const rec={name:String(SG.name),high:normSwings(set.high||[]),low:normSwings(set.low||[])};
+    const i=a.findIndex(x=>x.name.toLowerCase()===rec.name.toLowerCase());
+    if(i>=0)a[i]=rec;else a.push(rec);
+    cur[m]=i>=0?i:a.length-1;
+    loadProfileIntoForm();saveState();
+    return true;
+  }
+  fill();
+  // chart dan halaman ini satu origin: perubahan indikator di chart memicu event 'storage' di sini
+  window.addEventListener('storage',e=>{
+    if(e.key&&(e.key.startsWith('cg.ind.')||e.key==='cg.denoise.n')&&fill())recalc();
+  });
 })();
 
 recalc();

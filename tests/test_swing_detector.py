@@ -84,3 +84,44 @@ def test_swing_moves():
     # last swing has no next swing yet
     assert m[2]["next_price"] is None and m[2]["bars"] is None
     assert m[0]["date"] == "2026-01-06"
+
+
+def test_denoised_period_1_equals_regular():
+    rng = np.random.default_rng(2)
+    c = 100 + np.cumsum(rng.normal(0, 1, 400))
+    h, l = c + rng.uniform(0, 1, 400), c - rng.uniform(0, 1, 400)
+    from shared.swing_detector import denoised_swings
+    assert denoised_swings(h, l, 1) == find_swings(h, l)
+
+
+def test_denoised_drops_noise_keeps_original_date():
+    from shared.swing_detector import denoised_swings
+    # regular swings: SH1 SL2 SH3 SL4 SH7 SL10; the small wiggle at bars 1-4 is noise
+    h, l = bars([10, 11, 10.5, 11.5, 11, 12, 13, 15, 14, 12, 11, 12, 13],
+                [9, 9.5, 9, 10, 9.6, 11, 12, 14, 13, 11, 8, 10, 12])
+    regular = find_swings(h, l)
+    assert regular == [(1, "SH"), (2, "SL"), (3, "SH"), (4, "SL"), (7, "SH"), (10, "SL")]
+    # blocks of 3: [0-2] [3-5] [6-8] [9-11] [12] -> highs 11,12,15,13,13 lows 9,9.6,12,8,12
+    # block swings: SH at block 2 (bars 6-8), SL at block 3 (bars 9-11)
+    assert denoised_swings(h, l, 3) == [(7, "SH"), (10, "SL")]
+
+
+def test_denoised_always_alternates_and_is_subset():
+    from shared.swing_detector import denoised_swings
+    rng = np.random.default_rng(3)
+    c = 100 + np.cumsum(rng.normal(0, 1, 600))
+    h, l = c + rng.uniform(0, 1, 600), c - rng.uniform(0, 1, 600)
+    regular = set(find_swings(h, l))
+    for p in (2, 3, 5, 10):
+        pts = denoised_swings(h, l, p)
+        assert set(pts) <= regular
+        kinds = [k for _, k in pts]
+        assert all(a != b for a, b in zip(kinds, kinds[1:]))
+        assert len(pts) <= len(regular)
+
+
+def test_mother_candle_mask():
+    from shared.swing_detector import mother_candle_mask
+    h, l = bars([10, 12, 11, 9, 10], [8, 10, 10.5, 7, 8])
+    # bar 2 is inside bar 1 -> bar 1 is the mother candle
+    assert mother_candle_mask(h, l).tolist() == [False, True, False, False, False]

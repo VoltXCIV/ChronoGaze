@@ -7,6 +7,7 @@ and shows it as an interactive candlestick chart drawn with TradingView's
 open-source Lightweight Charts library.
 """
 import json
+import uuid
 from pathlib import Path
 
 import pandas as pd
@@ -18,8 +19,10 @@ from shared.csv_loader import load_ohlc_csv
 from shared.ephemeris import DB_PATH as EPHEMERIS_DB, load_ephemeris
 from shared.moon_phases import EMOJI, load_moon_db, load_sign_sectors, nearest_bar_dates
 from shared.tag_db import load_idx_tags, load_moon_sign_tags, load_planet_sign_tags
+from shared.tg_backtest import RATIOS as TG_RATIOS, run_tg_backtest
 from shared.sun_signs import SYMBOLS as SUN_SYMBOLS, TAG_DB_PATH, load_sun_ingress_db, load_sun_sign_tags, sun_sign_segments
-from shared.swing_detector import TAG_SWING_HIGH, TAG_SWING_LOW, swing_moves, tag_bars
+from shared.swing_detector import (TAG_SWING_HIGH, TAG_SWING_LOW, denoised_swings, mother_candle_mask,
+                                   swing_moves, tag_bars)
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
@@ -163,8 +166,9 @@ def planet_sign_tags(mtime: float) -> list[dict]:
 
 @st.cache_data
 def idx_tags(mtime: float) -> list[dict]:
-    """IDX stocks and their tags, from the "IDX Tag" sheet of Tag DB.xlsx."""
-    return load_idx_tags() if mtime else []
+    """IDX stocks with a liquidity tier, and their tags, from the "IDX Tag" sheet of
+    Tag DB.xlsx. Stocks the sheet gives no tier are left out of the web page."""
+    return [s for s in load_idx_tags() if s["tier"]] if mtime else []
 
 
 def astronomy_view(html: str, page: str, css: str) -> str:
@@ -205,20 +209,36 @@ def load_buttons() -> str | None:
     return None
 
 
+# Denoised Swing: the user picks how many candles are merged into one, 1..DENOISE_MAX.
+# Every choice is computed up front so the chart can switch without a rerun.
+DENOISE_MAX = 30
+
+
+def swing_sets(df: pd.DataFrame) -> dict[int, list[tuple[int, str]]]:
+    """Denoised swings for every period; period 1 is the regular Swing indicator."""
+    high = df["High"].to_numpy(dtype=float)
+    low = df["Low"].to_numpy(dtype=float)
+    return {p: denoised_swings(high, low, p) for p in range(1, DENOISE_MAX + 1)}
+
+
 def time_geometry_payload(df: pd.DataFrame, name: str, market: str, last_n: int) -> dict:
-    """Most recent `last_n` swing highs and lows as DD-MM-YY strings."""
-    def dates(tag: str) -> list[str]:
-        picked = df.loc[df["Tag"] == tag, "Date"].tail(last_n)
-        return picked.dt.strftime("%d-%m-%y").tolist()
+    """Most recent `last_n` swing highs and lows as DD-MM-YY strings, per swing
+    indicator: "sets"["1"] is the regular Swing, "sets"["N"] Denoised Swing with N candles.
+    The Time Geometry page picks the set of the indicator switched on in the chart."""
+    dates = df["Date"].dt.strftime("%d-%m-%y").tolist()
 
-    return {"name": f"{name} · chart", "market": market,
-            "high": dates(TAG_SWING_HIGH), "low": dates(TAG_SWING_LOW)}
+    def last(points, tag):
+        return [dates[i] for i, k in points if k == tag][-last_n:]
+
+    sets = {str(p): {"high": last(pts, TAG_SWING_HIGH), "low": last(pts, TAG_SWING_LOW)}
+            for p, pts in swing_sets(df).items()}
+    return {"name": f"{name} · chart", "market": market, **sets["1"], "sets": sets}
 
 
-def inject_before_first_script(html: str, payload: dict) -> str:
-    """Define window.CHRONOGAZE_SWINGS before the page's own script runs."""
+def inject_before_first_script(html: str, payload: dict, name: str = "CHRONOGAZE_SWINGS") -> str:
+    """Define window.<name> before the page's own script runs."""
     data = json.dumps(payload).replace("</", "<\\/")
-    return html.replace("<script>", f"<script>window.CHRONOGAZE_SWINGS={data};</script>\n<script>", 1)
+    return html.replace("<script>", f"<script>window.{name}={data};</script>\n<script>", 1)
 LWC_URL = "https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"
 CHART_HEIGHT = 640
 CHART_PAGE = ROOT / "modules" / "chart" / "chart.html"
@@ -244,16 +264,7 @@ def to_chart_records(df: pd.DataFrame) -> tuple[list[dict], list[dict]]:
             "color": "rgba(38,166,154,0.5)" if c >= o else "rgba(239,83,80,0.5)",
         })
 
-    markers = []
-    if "Tag" in df.columns:
-        for t, tag in zip(times, df["Tag"]):
-            if tag == TAG_SWING_HIGH:
-                markers.append({"time": t, "position": "aboveBar", "color": "#f0b90b",
-                                "shape": "circle", "size": 0, "text": "^"})
-            elif tag == TAG_SWING_LOW:
-                markers.append({"time": t, "position": "belowBar", "color": "#2196f3",
-                                "shape": "circle", "size": 0, "text": "v"})
-    return candles, volumes, markers
+    return candles, volumes
 
 
 # How far past today (or past the last bar, if later) the chart extends so
@@ -340,11 +351,15 @@ def moon_records(df: pd.DataFrame) -> tuple[list[dict], list[dict]]:
 
 
 def render_chart(df: pd.DataFrame, title: str) -> None:
-    candles, volumes, markers = to_chart_records(df)
+    candles, volumes = to_chart_records(df)
+    # Swing indicators: bar indexes per period (1 = regular Swing), drawn by the page.
+    swings = {str(p): [[i, k] for i, k in pts] for p, pts in swing_sets(df).items()}
+    mother = mother_candle_mask(df["High"].to_numpy(dtype=float), df["Low"].to_numpy(dtype=float))
     moon_series, moon_markers = moon_records(df)
     sun_segs, sun_info = sun_sign_records(df)
     payload = json.dumps(
-        {"candles": candles, "volumes": volumes, "markers": markers, "title": title,
+        {"candles": candles, "volumes": volumes, "title": title,
+         "swings": swings, "mother": mother.nonzero()[0].tolist(), "denoiseMax": DENOISE_MAX,
          "moonSeries": moon_series, "moonMarkers": moon_markers,
          "sunSegs": sun_segs, "sunInfo": sun_info}
     ).replace("</", "<\\/")
@@ -418,6 +433,84 @@ def _pct_col(label: str, fmt: str = "%.1f%%", help: str | None = None):
     return st.column_config.NumberColumn(label, format=fmt, help=help)
 
 
+# Event table columns: (DataFrame column, header lines, number format, tooltip).
+# A custom HTML table so long headers can wrap onto two lines and the table stays slim.
+EVENT_COLUMNS = [
+    ("Event", ["Event"], None, None),
+    ("Jenis", ["Jenis"], None, None),
+    ("Sampel", ["Sampel"], "{:,.0f}", "Berapa kali event ini terjadi dan diuji."),
+    ("Swing", ["Swing"], "{:,.0f}", "Berapa kejadian yang punya swing dalam jendela."),
+    ("% Swing", ["%", "Swing"], "{:.1f}%", None),
+    ("% High", ["%", "High"], "{:.1f}%", "Porsi swing high di antara swing yang terjadi."),
+    ("% Low", ["%", "Low"], "{:.1f}%", "Porsi swing low di antara swing yang terjadi."),
+    ("Rata² SH → SL", ["Rata²", "SH → SL"], "{:+.2f}%", "Rata-rata perubahan dari High swing high ke Low swing low berikutnya."),
+    ("Rata² SL → SH", ["Rata²", "SL → SH"], "{:+.2f}%", "Rata-rata perubahan dari Low swing low ke High swing high berikutnya."),
+    ("Lift", ["Lift"], "{:.2f}×", "% Swing dibanding peluang swing pada hari biasa. Di atas 1 = lebih sering dari kebetulan."),
+    ("Lolos", ["Lolos"], None, None),
+]
+
+
+def event_table(view: pd.DataFrame, max_height: int = 420) -> None:
+    """Sortable event table with two-line headers (click a header to sort)."""
+    from html import escape
+    cols = [c for c in EVENT_COLUMNS if c[0] in view.columns]
+    head = "".join(
+        f'<th data-i="{i}" class="{"num" if fmt else "txt"}"'
+        f'{f" title={chr(34)}{escape(tip)}{chr(34)}" if tip else ""}>{"<br>".join(escape(x) for x in lines)}'
+        f'<span class="ar"></span></th>'
+        for i, (_, lines, fmt, tip) in enumerate(cols))
+    body = []
+    for _, row in view.iterrows():
+        cells = []
+        for key, _, fmt, _ in cols:
+            v = row[key]
+            if isinstance(v, (bool,)) or key == "Lolos":
+                cells.append(f'<td class="ok" data-v="{int(bool(v))}">{"✓" if v else ""}</td>')
+            elif fmt:
+                missing = v is None or pd.isna(v)
+                cls = "num" + (" neg" if not missing and key.startswith("Rata") and v < 0 else
+                               " pos" if not missing and key.startswith("Rata") and v > 0 else "")
+                cells.append(f'<td class="{cls}" data-v="{"" if missing else float(v)}">'
+                             f'{"—" if missing else fmt.format(v)}</td>')
+            else:
+                cells.append(f'<td data-v="{escape(str(v))}">{escape(str(v))}</td>')
+        body.append("<tr>" + "".join(cells) + "</tr>")
+    height = min(max_height, 62 + 33 * len(view))
+    html = f"""<style>
+    :root{{--bg:#0E1117;--head:#1A1D26;--line:rgba(250,250,250,.10);--ink:#FAFAFA;--muted:rgba(250,250,250,.6);
+           --hover:rgba(250,250,250,.05);--pos:#5FD38D;--neg:#FF7B7B;--accent:#FF4B4B}}
+    html,body{{margin:0;background:var(--bg);color:var(--ink);font:14px "Source Sans Pro","Source Sans 3",system-ui,sans-serif}}
+    .wrap{{height:{height - 2}px;overflow:auto;border:1px solid var(--line);border-radius:8px}}
+    table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}}
+    th{{position:sticky;top:0;background:var(--head);color:var(--muted);font-weight:600;font-size:13px;line-height:1.2;
+        padding:7px 8px;border-bottom:1px solid var(--line);cursor:pointer;user-select:none;vertical-align:bottom;white-space:nowrap}}
+    th:hover{{color:var(--ink)}}
+    th.txt{{text-align:left}} th.num{{text-align:right}}
+    th .ar{{font-size:10px;margin-left:3px;color:var(--accent)}}
+    td{{padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}}
+    td.num{{text-align:right}} td.ok{{text-align:center;color:var(--pos)}}
+    td.pos{{color:var(--pos)}} td.neg{{color:var(--neg)}}
+    tr:hover td{{background:var(--hover)}}
+    </style>
+    <div class="wrap"><table><thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table></div>
+    <script>
+    const tb=document.querySelector('tbody'), ths=[...document.querySelectorAll('th')];
+    let col=-1, dir=1;
+    ths.forEach(th=>th.addEventListener('click',()=>{{
+      const i=+th.dataset.i; dir = col===i ? -dir : (th.classList.contains('num') ? -1 : 1); col=i;
+      const key=tr=>tr.children[i].dataset.v, num=th.classList.contains('num')||i===ths.length-1;
+      [...tb.rows].sort((a,b)=>{{
+        const x=key(a), y=key(b);
+        if(x==='') return 1; if(y==='') return -1;      // empty values always last
+        return (num ? (+x - +y) : x.localeCompare(y)) * dir;
+      }}).forEach(r=>tb.appendChild(r));
+      ths.forEach(t=>t.querySelector('.ar').textContent='');
+      th.querySelector('.ar').textContent = dir>0 ? '▲' : '▼';
+    }}));
+    </script>"""
+    components.html(html, height=height)
+
+
 def show_backtest_report(result: dict, run_id: int, name: str) -> None:
     m, summary, hits, retro = result["meta"], result["summary"], result["hits"], result["retro"]
     st.divider()
@@ -425,13 +518,10 @@ def show_backtest_report(result: dict, run_id: int, name: str) -> None:
     st.caption(f"Run #{run_id} · {_dmy(m['start'])} – {_dmy(m['end'])} · {m['bars']:,} bar · {m['swings']:,} swing · "
                f"jendela ±{m['window']} hari · filter ≥{m['threshold']:g}% swing dan ≥{m['min_samples']} sampel · "
                f"tersimpan di `{BACKTEST_DB.relative_to(ROOT).as_posix()}`")
-    k = st.columns(4)
-    k[0].metric("Baseline acak", f"{m['baseline'] * 100:.1f}%",
-                help=f"Peluang hari kalender acak punya swing dalam ±{m['window']} hari "
-                     f"(dari {m['baseline_days']:,} hari). Event baru berarti bila jelas di atas angka ini.")
-    k[1].metric("Jenis event diuji", f"{m['event_types']:,}")
-    k[2].metric("Kejadian diuji", f"{m['occurrences']:,}")
-    k[3].metric("Lolos filter", f"{m['passed']:,}")
+    k = st.columns(3)
+    k[0].metric("Jenis Event Astrology Diuji", f"{m['event_types']:,}")
+    k[1].metric("Event Diuji", f"{m['occurrences']:,}")
+    k[2].metric("Lolos filter", f"{m['passed']:,}")
 
     # ---- events
     st.markdown("**Event dengan swing ≥ filter** · aspek planet, fase bulan, stasiun Mercury/Venus")
@@ -440,17 +530,14 @@ def show_backtest_report(result: dict, run_id: int, name: str) -> None:
     if table.empty:
         st.info("Tidak ada event yang lolos filter. Coba turunkan filter % swing atau sampel minimal.")
     else:
-        sh_sl, sl_sh = "Rata² SH → SL berikutnya", "Rata² SL → SH berikutnya"
         view = pd.DataFrame({
             "Event": table["event"], "Jenis": table["kind"], "Sampel": table["samples"],
             "Swing": table["swings"], "% Swing": table["pct_swing"], "% High": table["pct_high"],
-            "% Low": table["pct_low"], sh_sl: table["avg_move_high"], sl_sh: table["avg_move_low"],
-            "Lift": table["lift"], "Lolos": table["passed"]})
-        st.dataframe(view, hide_index=True, use_container_width=True, column_config={
-            "Sampel": st.column_config.NumberColumn("Sampel", help="Berapa kali event ini terjadi dan diuji."),
-            "% Swing": _pct_col("% Swing"), "% High": _pct_col("% High"), "% Low": _pct_col("% Low"),
-            sh_sl: _pct_col(sh_sl, "%+.2f%%"), sl_sh: _pct_col(sl_sh, "%+.2f%%"),
-            "Lift": _pct_col("Lift", "%.2f×", "% Swing dibagi baseline acak. Di atas 1 = lebih sering dari kebetulan.")})
+            "% Low": table["pct_low"], "Rata² SH → SL": table["avg_move_high"],
+            "Rata² SL → SH": table["avg_move_low"], "Lift": table["lift"], "Lolos": table["passed"]})
+        event_table(view)
+        st.download_button("⬇ Download CSV", view.to_csv(index=False).encode("utf-8"),
+                           file_name=f"backtest_{run_id}_events.csv", mime="text/csv", key=f"bt_csv_{run_id}")
         st.caption("% High / % Low = porsi swing high / swing low di antara swing yang terjadi. "
                    "SH → SL = perubahan dari High swing high ke Low swing low berikutnya; "
                    "SL → SH = dari Low swing low ke High swing high berikutnya.")
@@ -503,10 +590,124 @@ def show_backtest_report(result: dict, run_id: int, name: str) -> None:
                "dari 7 bar. Trend di suatu bar hanya memakai swing yang sudah terbentuk sebelum bar itu.")
 
 
+# ---------------------------------------------------------------- time geometry backtest
+def swings_tagged(df: pd.DataFrame, period: int) -> pd.DataFrame:
+    """`df` with its Tag column holding Denoised Swing points (period 1 = regular Swing)."""
+    if period == 1:
+        return df
+    tags = [""] * len(df)
+    for i, kind in denoised_swings(df["High"].to_numpy(dtype=float), df["Low"].to_numpy(dtype=float), period):
+        tags[i] = kind
+    return df.assign(Tag=tags)
+
+
+def swing_source_label(period: int) -> str:
+    return "Swing biasa" if period == 1 else f"Denoised Swing {period} candle"
+
+
+def render_tg_backtest() -> None:
+    """Time Geometry > Backtest: a confirmation, then the Calculator setting scored
+    on the loaded chart (points per var F, +-1 bar on/off, cross factor)."""
+    if "df" not in st.session_state:
+        st.info("Load data dulu lewat **📂 Load Data** di sidebar. Backtest memakai data chart yang sedang ditampilkan.")
+        return
+    df, name, market = st.session_state["df"], st.session_state["name"], st.session_state["market"]
+    if not is_daily(df):
+        st.warning("Backtest Time Geometry hanya bisa untuk data harian.")
+        return
+    c = st.columns(3)
+    period = int(c[0].number_input(
+        "Swing: jumlah candle Denoised Swing (1 = Swing biasa)", min_value=1, max_value=DENOISE_MAX,
+        value=1, step=1, key="tgbt_period",
+        help="Samakan dengan indikator swing yang Anda pakai di chart, karena itulah yang dikirim ke Calculator."))
+    tagged = swings_tagged(df, period)
+    counts = tagged["Tag"].value_counts()
+    ratios = ", ".join(f"{f:g}" for f in TG_RATIOS)
+    st.markdown(
+        f"Backtest akan menilai **setting Calculator** untuk **{name}** ({MARKETS[market]}): "
+        f"**{len(df):,} bar**, {df['Date'].iloc[0]:%d/%m/%y} sampai {df['Date'].iloc[-1]:%d/%m/%y}, dengan "
+        f"**{counts.get(TAG_SWING_HIGH, 0)} swing high** dan **{counts.get(TAG_SWING_LOW, 0)} swing low** "
+        f"dari {swing_source_label(period)}.\n\n"
+        "Backtest berjalan maju dari swing paling awal sampai paling akhir. Di setiap swing, proyeksi dihitung "
+        f"hanya dari {TG_LAST_N} swing high dan {TG_LAST_N} swing low terakhir yang sudah terbentuk saat itu, "
+        f"untuk semua var F ({ratios}) di setiap interval dan di faktor silang. Lalu dicek di bar mana swing "
+        "berikutnya benar-benar terjadi:\n"
+        "- Proyeksi yang jatuh **tepat** di bar itu: poin untuk var F-nya, dengan ±1 hari off.\n"
+        "- Proyeksi yang meleset **1 bar** (sebelum atau sesudah): poin untuk var F-nya, dengan ±1 hari on.\n\n"
+        "Hasilnya: **bobot 0–1 tiap var F**, **±1 hari on atau off**, dan **bobot faktor silang**. "
+        "Interval lama dan baru dihitung sama.")
+    run_key = (name, len(df), str(df["Date"].iloc[-1]), period)
+    if st.button("▶ Start Backtest", type="primary", key="tgbt_go"):
+        with st.spinner("Menghitung poin tiap var F…"):
+            try:
+                result = run_tg_backtest(tagged, history=TG_LAST_N)
+            except ValueError as exc:
+                st.error(str(exc))
+                return
+        st.session_state["tg_backtest"] = {"key": run_key, "result": result}
+    bt = st.session_state.get("tg_backtest")
+    if bt and bt.get("key") == run_key:
+        show_tg_backtest(bt["result"], name, swing_source_label(period))
+
+
+def apply_tg_weights(setting: dict, label: str) -> None:
+    """Button callback: hand the setting to the Calculator page and open it.
+    The page applies it once (a new id per click), then keeps manual edits."""
+    st.session_state["tg_weights"] = {"id": uuid.uuid4().hex, "label": label, **setting}
+    st.session_state["tg_weights_notice"] = True
+    st.session_state["nav_sel"] = "tg"
+
+
+def show_tg_backtest(res: dict, name: str, source: str) -> None:
+    m, tol, rows = res["meta"], res["tolerance"], res["rows"]
+    pct = lambda x: f"{100 * x:.2f}%"
+    state = "ON" if tol["on"] else "OFF"
+    st.divider()
+    st.markdown(f"##### Hasil backtest · {name} · {source}")
+    st.caption(f"{m['steps']:,} swing dinilai · {_dmy(m['first'])} – {_dmy(m['last'])}")
+    st.markdown(
+        f"**±1 hari: {state}.** Tanggal proyeksi yang tepat kena {tol['exact_hits']:,} dari "
+        f"{tol['exact_dates']:,} tanggal ({pct(tol['exact_rate'])}); tanggal 1 bar di sebelahnya kena "
+        f"{tol['near_hits']:,} dari {tol['near_dates']:,} tanggal ({pct(tol['near_rate'])}). "
+        + ("Tanggal di sebelahnya lebih sering kena, jadi proyeksi yang meleset 1 bar ikut mendapat poin."
+           if tol["on"] else
+           "Tanggal di sebelahnya tidak lebih sering kena, jadi hanya proyeksi yang tepat yang mendapat poin."))
+    table = pd.DataFrame({
+        "Variabel": [r["variable"] for r in rows],
+        "Bobot": [r["weight"] for r in rows],
+        "Poin": [r["hits"] for r in rows],
+        "Proyeksi": [r["projections"] for r in rows],
+        "Kena %": [100 * r["rate"] for r in rows]})
+    st.dataframe(table, hide_index=True, use_container_width=True, height=35 * (len(table) + 1) + 3,
+                 column_config={
+                     "Bobot": st.column_config.ProgressColumn(min_value=0, max_value=1, format="%.3f"),
+                     "Kena %": st.column_config.NumberColumn(format="%.2f%%")})
+    hit = "tepat atau meleset 1 bar" if tol["on"] else "tepat"
+    st.caption(
+        f"**Poin** = berapa kali proyeksi var F itu jatuh {hit} di swing berikutnya. **Proyeksi** = berapa kali "
+        "var F itu menunjuk tanggal sesudah swing terakhir. **Kena %** = Poin ÷ Proyeksi. **Bobot** = Kena % "
+        "dibagi Kena % tertinggi di antara var F, jadi var F terbaik = 1. Bobot faktor silang = Kena % faktor "
+        f"silang ÷ Kena % interval swing sejenis ({pct(m['same_rate'])}), paling tinggi 1.")
+    c = st.columns([1.5, 1, 2.5])
+    c[0].button("✅ Terapkan ke Calculator", type="primary", key="tgbt_apply", use_container_width=True,
+                on_click=apply_tg_weights, args=(res["setting"], f"{name} · {source}"),
+                help="Bobot var F dan faktor silang dipasang di Calculator (bobot 0 = dimatikan), "
+                     "dan ±1 hari dinyalakan atau dimatikan.")
+    csv = pd.concat([pd.DataFrame({"Variabel": ["±1 hari"], "Bobot": [state]}), table.astype({"Bobot": object})],
+                    ignore_index=True)
+    c[1].download_button("⬇ Download CSV", csv.to_csv(index=False).encode("utf-8"), use_container_width=True,
+                         file_name=f"tg_setting_{name}.csv", mime="text/csv", key="tgbt_csv")
+
+
 # ---------------------------------------------------------------- navigation
-# Sidebar navigation: one entry per tool, Astronomy has its own sub-menu.
+# Sidebar navigation: a tree with one folder per tool and its views below it.
 # Only the chosen view is drawn below the chart.
 NAV_TIME_GEOMETRY, NAV_ASTRONOMY = TOOLS[0][0], TOOLS[1][0]
+TG_VIEWS = [("🧮 Calculator", "tg"), ("📊 Backtest", "tg_backtest")]
+NAV_GROUPS = [
+    ("tg", NAV_TIME_GEOMETRY, TG_VIEWS),
+    ("astro", NAV_ASTRONOMY, [(label, view) for label, view, _, _ in ASTRO_VIEWS]),
+]
 
 
 def load_data_menu() -> None:
@@ -562,31 +763,40 @@ def _nav_select(item: str) -> None:
     st.session_state["nav_sel"] = item
 
 
-def _nav_toggle_astro() -> None:
-    opening = not st.session_state.get("nav_astro_open", False)
-    st.session_state["nav_astro_open"] = opening
-    if opening and st.session_state.get("nav_sel", "tg") == "tg":
-        st.session_state["nav_sel"] = ASTRO_VIEWS[0][1]
+def _nav_group(view: str) -> tuple[str, str, list]:
+    return next(g for g in NAV_GROUPS if any(v == view for _, v in g[2]))
 
 
-def nav_tree() -> tuple[str, tuple | None]:
-    """Tree menu like a file explorer: Time Geometry, and Astronomy with its
-    views indented below it (folds open/closed). Returns (tool label, astro view or None)."""
+def _nav_toggle(group: str) -> None:
+    """Fold a tool open or closed; opening one that holds no selected view selects its first view."""
+    key = f"nav_open_{group}"
+    opening = not st.session_state.get(key, False)
+    st.session_state[key] = opening
+    items = next(g[2] for g in NAV_GROUPS if g[0] == group)
+    if opening and _nav_group(st.session_state.get("nav_sel", "tg"))[0] != group:
+        st.session_state["nav_sel"] = items[0][1]
+
+
+def nav_tree() -> tuple[str, str, str]:
+    """Tree menu like a file explorer: each tool folds open/closed with its views
+    indented below it. Returns (tool label, view key, view label)."""
     st.markdown(NAV_CSS, unsafe_allow_html=True)
     sel = st.session_state.setdefault("nav_sel", "tg")
-    is_open = st.session_state.setdefault("nav_astro_open", sel != "tg")
+    if not any(v == sel for g in NAV_GROUPS for _, v in g[2]):
+        sel = st.session_state["nav_sel"] = "tg"
+    current = _nav_group(sel)[0]
     with st.container(key="navtree"):
-        st.button(NAV_TIME_GEOMETRY, key="navp_tg", use_container_width=True,
-                  type="secondary" if sel == "tg" else "tertiary", on_click=_nav_select, args=("tg",))
-        st.button(f"{NAV_ASTRONOMY}  {'⌄' if is_open else '›'}", key="navp_astro", use_container_width=True,
-                  type="secondary" if sel != "tg" and not is_open else "tertiary", on_click=_nav_toggle_astro)
-        if is_open:
-            for label, view, _, _ in ASTRO_VIEWS:
-                st.button(label, key=f"navc_{view}", use_container_width=True,
-                          type="secondary" if sel == view else "tertiary", on_click=_nav_select, args=(view,))
-    if sel == "tg":
-        return NAV_TIME_GEOMETRY, None
-    return NAV_ASTRONOMY, next(v for v in ASTRO_VIEWS if v[1] == sel)
+        for group, label, items in NAV_GROUPS:
+            is_open = st.session_state.setdefault(f"nav_open_{group}", group == current)
+            st.button(f"{label}  {'⌄' if is_open else '›'}", key=f"navp_{group}", use_container_width=True,
+                      type="secondary" if group == current and not is_open else "tertiary",
+                      on_click=_nav_toggle, args=(group,))
+            if is_open:
+                for child, view in items:
+                    st.button(child, key=f"navc_{view}", use_container_width=True,
+                              type="secondary" if sel == view else "tertiary", on_click=_nav_select, args=(view,))
+    _, tool, items = _nav_group(sel)
+    return tool, sel, next(child for child, v in items if v == sel)
 
 
 # Data loaded before the market choice existed: make the user load it again
@@ -610,7 +820,7 @@ with st.sidebar:
                    f"^ {counts.get(TAG_SWING_HIGH, 0)} swing high · v {counts.get(TAG_SWING_LOW, 0)} swing low")
 
     st.divider()
-    nav, astro_view = nav_tree()
+    nav, nav_view, nav_view_label = nav_tree()
 
 # ---------------------------------------------------------------- main
 if "df" not in st.session_state:
@@ -626,11 +836,21 @@ else:
 # ---------------------------------------------------------------- chosen tool
 st.divider()
 page = TIME_GEOMETRY_PAGE if nav == NAV_TIME_GEOMETRY else ASTRONOMY_PAGE
-st.subheader(nav if astro_view is None else f"{nav} · {astro_view[0]}")
-if not page.exists():
+st.subheader(f"{nav} · {nav_view_label}")
+if nav_view == "tg_backtest":
+    render_tg_backtest()
+elif not page.exists():
     st.error(f"File tidak ditemukan: `{page}`")
 elif page == TIME_GEOMETRY_PAGE:
     html = page.read_text(encoding="utf-8")
+    weights = st.session_state.get("tg_weights")
+    if weights:
+        html = inject_before_first_script(html, weights, "CHRONOGAZE_WEIGHTS")
+        if st.session_state.pop("tg_weights_notice", False):
+            tol = "ON" if weights.get("tolOn") else "OFF"
+            st.success(f"Setting dari backtest **{weights['label']}** sudah diterapkan ke Calculator: "
+                       f"bobot var F, faktor silang, dan ±1 hari {tol}. Var F atau faktor silang dengan "
+                       "bobot 0 dimatikan. Semuanya masih bisa diubah manual di panel kiri Calculator.")
     if "df" in st.session_state:
         df = st.session_state["df"]
         if is_daily(df):
@@ -638,13 +858,14 @@ elif page == TIME_GEOMETRY_PAGE:
             payload = time_geometry_payload(df, st.session_state["name"], market, TG_LAST_N)
             html = inject_before_first_script(html, payload)
             st.caption(f"{TG_LAST_N} swing high dan {TG_LAST_N} swing low terakhir sudah diisi ke "
-                       f"profil **{payload['name']}** (pasar {MARKETS[market]}). "
-                       "Profil ini ditimpa ulang setiap kali data di-load.")
+                       f"profil **{payload['name']}** (pasar {MARKETS[market]}), dari indikator swing "
+                       "yang sedang aktif di chart (Swing atau Denoised Swing). Profil ini ditimpa "
+                       "ulang setiap kali data di-load atau indikator swing diubah.")
         else:
             st.caption("Data intraday: swing tidak dikirim ke Time Geometry (alat ini memakai tanggal harian).")
     components.html(html, height=TOOL_HEIGHT, scrolling=True)
 else:
-    _, view, height, css = astro_view
+    _, view, height, css = next(v for v in ASTRO_VIEWS if v[1] == nav_view)
     if view == "backtest":
         render_backtest()
     else:

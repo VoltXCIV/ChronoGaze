@@ -47,7 +47,12 @@
                  stroke-linecap:round; stroke-linejoin:round; }
   .ind-row.off { color:#5d606b; }
   .ind-row.off .nm { text-decoration:line-through; }
-  @media (max-width:560px) { #ind { width:44px; } #ind .h, .ind-row .nm { display:none; } }
+  .ind-opt { display:flex; align-items:center; gap:6px; padding:0 4px 6px 27px; font-size:12px; color:#9598a1; }
+  .ind-opt input { width:46px; box-sizing:border-box; background:#1e222d; color:#d1d4dc; border:1px solid #363a45;
+                   border-radius:4px; padding:2px 4px; font:inherit; }
+  .ind-opt input:focus { outline:none; border-color:#2962ff; }
+  .ind-opt.off { display:none; }
+  @media (max-width:560px) { #ind { width:44px; } #ind .h, .ind-row .nm, .ind-opt { display:none; } }
 </style>
 <script src="__LWC_URL__"></script>
 <script>
@@ -184,33 +189,84 @@ chart.subscribeCrosshairMove(updateLegend);
 // hide it. The choice is remembered in this browser.
 const EYE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 const EYE_OFF = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/></svg>';
+// ---- swing indicators ----
+// "Swing ^ v" and "Denoised Swing" never show together: switching one on
+// switches the other off. Denoised Swing merges N candles into one (N set in
+// the box under it) and keeps only the swings that survive. "Mother Candle
+// Swing" adds an ⓘ to a swing bar whose next bar sits inside it.
+// The active choice is kept in localStorage ('cg.ind.*', 'cg.denoise.n'); the
+// Time Geometry tab listens for it and refills its swing dates.
+let swingOn = false, dswingOn = false, motherOn = false;
+const clampN = v => Math.min(data.denoiseMax, Math.max(1, Math.round(+v) || 1));
+let denoiseN = 1;
+const motherSet = new Set(data.mother);
+function applySwings() {
+  const pts = swingOn ? data.swings['1'] : dswingOn ? data.swings[String(denoiseN)] : [];
+  const out = [];
+  for (const [i, k] of pts) {
+    const t = data.candles[i].time, hi = k === 'SH';
+    const pos = hi ? 'aboveBar' : 'belowBar';
+    // below a bar markers stack downwards, above a bar upwards: put ⓘ on the outside
+    const sym = { time: t, position: pos, color: hi ? '#f0b90b' : '#2196f3', shape: 'circle', size: 0, text: hi ? '^' : 'v' };
+    const info = { time: t, position: pos, color: '#d1d4dc', shape: 'circle', size: 0, text: 'ⓘ' };
+    out.push(sym);
+    if (motherOn && motherSet.has(i)) out.push(info);
+  }
+  candle.setMarkers(out);
+}
 const INDICATORS = [
-  { id: 'sun', name: 'Sun in Sign', apply: on => { sunOn = on; drawSun(); } },
-  { id: 'moon', name: 'Moon Phase', apply: on => { moonOn = on; moon.setMarkers(on ? data.moonMarkers : []); } },
-  { id: 'swing', name: 'Swing ^ v', apply: on => candle.setMarkers(on ? data.markers : []) },
-  { id: 'vol', name: 'Volume', apply: on => { volOn = on; vol.applyOptions({ visible: on }); } },
+  { id: 'sun', name: 'Sun in Sign', def: true, apply: on => { sunOn = on; drawSun(); } },
+  { id: 'moon', name: 'Moon Phase', def: true, apply: on => { moonOn = on; moon.setMarkers(on ? data.moonMarkers : []); } },
+  { id: 'swing', name: 'Swing ^ v', def: true, excl: 'dswing', apply: on => { swingOn = on; applySwings(); } },
+  { id: 'dswing', name: 'Denoised Swing', def: false, excl: 'swing', apply: on => { dswingOn = on; applySwings(); } },
+  { id: 'mother', name: 'Mother Candle Swing', def: true, apply: on => { motherOn = on; applySwings(); } },
+  { id: 'vol', name: 'Volume', def: true, apply: on => { volOn = on; vol.applyOptions({ visible: on }); } },
 ];
 const store = {
   get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } },
   set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} },
 };
+denoiseN = clampN(store.get('cg.denoise.n') || 1);
 const list = document.getElementById('indList');
+const setters = {};
 INDICATORS.forEach(ind => {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'ind-row';
   list.appendChild(btn);
+  let opt = null;
+  if (ind.id === 'dswing') {
+    opt = document.createElement('label');
+    opt.className = 'ind-opt';
+    opt.innerHTML = `Candle <input type="number" min="1" max="${data.denoiseMax}" step="1" value="${denoiseN}" ` +
+                    `title="Jumlah candle yang digabung jadi 1 (1–${data.denoiseMax})">`;
+    list.appendChild(opt);
+    const inp = opt.querySelector('input');
+    inp.addEventListener('change', () => {
+      denoiseN = clampN(inp.value); inp.value = denoiseN;
+      store.set('cg.denoise.n', String(denoiseN));
+      applySwings();
+    });
+  }
   const set = on => {
     btn.classList.toggle('off', !on);
+    if (opt) opt.classList.toggle('off', !on);
     btn.setAttribute('aria-pressed', String(on));
     btn.title = (on ? 'Sembunyikan ' : 'Tampilkan ') + ind.name;
     btn.innerHTML = (on ? EYE : EYE_OFF) + `<span class="nm">${ind.name}</span>`;
     store.set('cg.ind.' + ind.id, on ? '1' : '0');
+    if (on && ind.excl && setters[ind.excl] && setters[ind.excl].isOn()) setters[ind.excl].set(false);
     ind.apply(on);
     updateLegend();
   };
+  setters[ind.id] = { set, isOn: () => !btn.classList.contains('off') };
   btn.addEventListener('click', () => set(btn.classList.contains('off')));
-  set(store.get('cg.ind.' + ind.id) !== '0');
+});
+INDICATORS.forEach(ind => {
+  const saved = store.get('cg.ind.' + ind.id);
+  let on = saved === null ? ind.def : saved === '1';
+  if (ind.id === 'dswing' && on && setters.swing.isOn()) on = false;   // never both on
+  setters[ind.id].set(on);
 });
 
 // Start zoomed on the most recent ~150 bars plus the next few weeks.

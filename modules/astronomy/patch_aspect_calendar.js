@@ -54,7 +54,10 @@
         berpindah rasi pada jam tersebut di hari itu. ℞ = sedang retrograde.
         <span class="ac-key gold">Emas</span> = Mercury retrograde: Emas ikut diuntungkan sepanjang periode retrograde
         (jarang terjadi dan cukup akurat). <span class="ac-key weak">Baja</span> = tag kelas dua: tag Saturn yang
-        sama dengan Mars, dorongannya lebih lemah.</p>
+        sama dengan Mars, dorongannya lebih lemah.<br>Warna kode emiten = liquidity tier:
+        <span class="ac-key tA">Tier A</span> <span class="ac-key tB">Tier B</span>
+        <span class="ac-key tC">Tier C</span> <span class="ac-key tD">Tier D</span>; emiten tanpa tier tidak ditampilkan.
+        Emiten berkilau emas dengan tanda ✦ diuntungkan Mercury retrograde (huruf kecil = tier-nya).</p>
     </section>`;
   wrap.insertBefore(page, wrap.firstChild);
 
@@ -78,14 +81,25 @@
     .ac-lab{font-size:12px;font-weight:600;color:var(--muted);padding-top:5px}
     .ac-chips{display:flex;flex-wrap:wrap;gap:6px}
     .ac-chips span{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:4px 10px;font-size:12.5px;font-weight:600}
-    .ac-chips span.gold{background:linear-gradient(135deg,#F6D77A,#D4A22B);border-color:#B8860B;color:#3A2A00}
+    /* Mercury retrograde: metallic gold (static gradient) and a star, so it never reads as flat Tier C yellow */
+    .ac-chips span.gold{background:linear-gradient(115deg,#A8740F 0%,#F3CF5E 22%,#FFF7D1 38%,#E9B73F 52%,#B07A12 74%,#F5D46A 100%);border:1px solid #8A6100;color:#2E2000;text-shadow:0 1px 0 rgba(255,250,220,.6);box-shadow:0 0 0 1px rgba(255,214,90,.25),0 1px 7px rgba(212,162,43,.55);font-weight:700}
+    .ac-chips span.gold::before{content:"✦ "}
     .ac-chips span.weak{background:transparent;border-style:dashed;color:var(--muted);font-weight:500}
     .ac-key{display:inline-block;border:1px solid var(--line);border-radius:6px;padding:0 6px;font-weight:600;font-size:11.5px}
-    .ac-key.gold{background:linear-gradient(135deg,#F6D77A,#D4A22B);border-color:#B8860B;color:#3A2A00}
+    .ac-key.gold{background:linear-gradient(115deg,#A8740F 0%,#F3CF5E 22%,#FFF7D1 38%,#E9B73F 52%,#B07A12 74%,#F5D46A 100%);border:1px solid #8A6100;color:#2E2000;text-shadow:0 1px 0 rgba(255,250,220,.6);box-shadow:0 0 0 1px rgba(255,214,90,.25),0 1px 7px rgba(212,162,43,.55)}
     .ac-key.weak{border-style:dashed;color:var(--muted);font-weight:500}
     .ac-note{font-size:12px;color:var(--muted)}
     .ac-lab small{display:block;font-weight:500;font-size:11px}
-    .ac-chips.em span{font-family:var(--mono);font-size:12px;letter-spacing:.02em}
+    .ac-chips.em span{font-family:var(--mono);font-size:12px;letter-spacing:.02em;color:#1F2430}
+    /* liquidity tier = chip background */
+    .ac-chips.em span.tA,.ac-key.tA{background:#CFE2FA;border-color:#9DBFEA}
+    .ac-chips.em span.tB,.ac-key.tB{background:#D2F0D7;border-color:#9DD4A8}
+    .ac-chips.em span.tC,.ac-key.tC{background:#FBF0B8;border-color:#E3CF73}
+    .ac-chips.em span.tD,.ac-key.tD{background:#F9D3D3;border-color:#E5A3A3}
+    .ac-chips.em span.weak{border-style:dashed;opacity:.5;font-weight:500}
+    .ac-chips.em span.gold{color:#2E2000}
+    .ac-chips.em span i{font-style:normal;font-size:9.5px;font-weight:700;opacity:.7;margin-left:3px;vertical-align:1px}
+    .ac-key.tA,.ac-key.tB,.ac-key.tC,.ac-key.tD{color:#1F2430;font-family:var(--mono)}
     .ac-chips .ac-more{background:none;border:1px dashed var(--line);border-radius:8px;padding:3px 9px;font-size:12px;color:var(--accent);min-height:0}
     .ac-chips .ac-rest{display:contents}
     .ac-empty{color:var(--muted);font-size:13.5px;padding:10px 2px}
@@ -177,11 +191,15 @@
       const rank = Math.max(...hit.map(t => best.get(t.toLowerCase())));
       out.push({ st, hit, rank });
     }
-    return out.sort((a, b) => b.rank - a.rank || b.hit.length - a.hit.length || a.st.code.localeCompare(b.st.code));
+    return out.sort((a, b) => b.rank - a.rank || a.st.tier.localeCompare(b.st.tier) ||
+      b.hit.length - a.hit.length || a.st.code.localeCompare(b.st.code));
   }
   const CLS = { 3: 'gold', 2: '', 1: 'weak' };
   function emitenChips(list) {
-    const chip = m => `<span${CLS[m.rank] ? ` class="${CLS[m.rank]}"` : ''} title="${esc(m.st.name)} — ${esc(m.hit.join(', '))}">${esc(m.st.code)}</span>`;
+    // Background = liquidity tier; a gold (Mercury retrograde) chip keeps its tier as a small letter.
+    const chip = m => `<span class="${CLS[m.rank] === 'gold' ? 'gold' : `t${m.st.tier} ${CLS[m.rank]}`}" ` +
+      `title="${esc(m.st.name)} — Tier ${esc(m.st.tier)} — ${esc(m.hit.join(', '))}">${esc(m.st.code)}` +
+      `${CLS[m.rank] === 'gold' ? `<i>${esc(m.st.tier)}</i>` : ''}</span>`;
     const head = list.slice(0, EMITEN_SHOWN).map(chip).join('');
     const rest = list.slice(EMITEN_SHOWN);
     return `<div class="ac-chips em">${head}` + (rest.length

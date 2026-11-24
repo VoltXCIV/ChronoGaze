@@ -83,16 +83,19 @@ IDX_SHEET = "IDX Tag"
 
 
 def load_idx_tags(path: Path = TAG_DB_PATH) -> list[dict]:
-    """[{"code": "AADI", "name": "PT Adaro ...", "tags": ["Energi", ...]}, ...] from the
-    "IDX Tag" sheet, in sheet order. Rows without a code are skipped."""
+    """[{"code": "AADI", "name": "PT Adaro ...", "tags": ["Energi", ...], "tier": "A"}, ...]
+    from the "IDX Tag" sheet, in sheet order. Rows without a code are skipped; "tier" is
+    the liquidity tier (A-D), or "" when the sheet leaves it empty."""
     df = pd.read_excel(path, sheet_name=IDX_SHEET)
     code_col = column(df, "kode") or column(df, "code")
     name_col = column(df, "nama") or column(df, "name")
     tag_col = column(df, "tag")
+    tier_col = column(df, "tier")
     out = []
     for _, row in df.iterrows():
         code = clean(row[code_col]).upper()
         if code:
             out.append({"code": code, "name": clean(row[name_col]) if name_col else "",
-                        "tags": split_tags(clean(row[tag_col]))})
+                        "tags": split_tags(clean(row[tag_col])),
+                        "tier": clean(row[tier_col]).upper() if tier_col else ""})
     return out

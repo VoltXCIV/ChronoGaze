@@ -39,6 +39,8 @@ def test_idx_tags(tmp_path):
     _book(path)
     with pd.ExcelWriter(path, mode="a") as w:
         pd.DataFrame({"kode_emiten": ["aadi", None], "Nama Perusahaan": ["PT Adaro", "x"],
-                      "tag": ["Energi; Batu Bara", "Emas"], "planet_terkait": ["Sun", ""]}
+                      "tag": ["Energi; Batu Bara", "Emas"], "planet_terkait": ["Sun", ""],
+                      "liquidity_tier": ["a", None]}
                      ).to_excel(w, sheet_name="IDX Tag", index=False)
-    assert load_idx_tags(path) == [{"code": "AADI", "name": "PT Adaro", "tags": ["Energi", "Batu Bara"]}]
+    assert load_idx_tags(path) == [{"code": "AADI", "name": "PT Adaro", "tags": ["Energi", "Batu Bara"],
+                                     "tier": "A"}]

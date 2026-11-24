@@ -113,3 +113,52 @@ def tag_bars(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     out["Tag"] = tags
     return out
+
+
+def _collapse(points: list[tuple[int, str]], high: np.ndarray, low: np.ndarray) -> list[tuple[int, str]]:
+    """Make swings alternate: consecutive same-type swings keep the most extreme
+    one (highest high / lowest low), the newest on an exact tie."""
+    out: list[tuple[int, str]] = []
+    for i, kind in points:
+        if out and out[-1][1] == kind:
+            j = out[-1][0]
+            better = high[i] >= high[j] if kind == TAG_SWING_HIGH else low[i] <= low[j]
+            if better:
+                out[-1] = (i, kind)
+            continue
+        out.append((i, kind))
+    return out
+
+
+def denoised_swings(high: np.ndarray, low: np.ndarray, period: int) -> list[tuple[int, str]]:
+    """Swings that survive merging every `period` bars into one bar.
+
+    1. Bars are grouped in blocks of `period`, counted from the first bar
+       (so blocks stay put when new bars arrive; only the last block grows).
+       A block's High is the highest High in it, its Low the lowest Low.
+    2. `find_swings` runs on the blocks.
+    3. A regular (1-bar) swing is valid when the block it sits in is a swing
+       of the same type. Its own date is kept, not the block's.
+    4. Valid swings are made to alternate again (see `_collapse`).
+
+    period=1 gives exactly the regular swings.
+    """
+    period = max(1, int(period))
+    regular = find_swings(high, low)
+    if period == 1:
+        return regular
+    n = len(high)
+    starts = np.arange(0, n, period)
+    block_high = np.maximum.reduceat(high, starts)
+    block_low = np.minimum.reduceat(low, starts)
+    block_kind = dict(find_swings(block_high, block_low))
+    valid = [(i, kind) for i, kind in regular if block_kind.get(i // period) == kind]
+    return _collapse(valid, high, low)
+
+
+def mother_candle_mask(high: np.ndarray, low: np.ndarray) -> np.ndarray:
+    """True for a bar whose next bar sits inside it (next High lower and next Low higher)."""
+    mother = np.zeros(len(high), dtype=bool)
+    if len(high) > 1:
+        mother[:-1] = inside_bar_mask(high, low)[1:]
+    return mother
