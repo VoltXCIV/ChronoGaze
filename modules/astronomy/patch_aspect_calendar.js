@@ -113,6 +113,8 @@
       background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px 12px;
       font-size:12.5px;line-height:1.4;box-shadow:0 8px 24px rgba(0,0,0,.35)}
     .ac-tip .c{font-family:var(--mono);font-size:15px;font-weight:700}
+    .ac-tip .spin{display:inline-block;width:11px;height:11px;margin-right:6px;vertical-align:-1px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:acspin .8s linear infinite}
+    @keyframes acspin{to{transform:rotate(360deg)}}
     .ac-tip .n{color:var(--muted);font-size:11.5px;margin-bottom:6px}
     .ac-tip .l{color:var(--muted);font-size:11px;font-weight:600;margin-top:7px;text-transform:uppercase;letter-spacing:.04em}
     .ac-tip .tg{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}
@@ -323,8 +325,9 @@
     const boosted = st.tags.filter(t => lv.has(t.toLowerCase()));
     const tr = TRENDS[st.code];
     let trend;
-    if (!tr) trend = '<span class="s">Data harga belum ada (jalankan: python -m shared.price_store).</span>';
-    else if (tr.error) trend = '<span class="s">CSV harga tidak bisa dibaca.</span>';
+    if (!tr) { trend = '<span class="s"><span class="spin"></span>Memuat data harga dari Yahoo Finance…</span>'; loadTrend(st.code); }
+    else if (tr.loading) trend = '<span class="s"><span class="spin"></span>Memuat data harga dari Yahoo Finance…</span>';
+    else if (tr.error) trend = `<span class="s">${esc(tr.msg || 'CSV harga tidak bisa dibaca.')}</span>`;
     else {
       const [c, t] = TREND[tr.trend] || TREND[''];
       trend = `<span class="tr ${c}">${t}</span>` + (tr.since ? ` <span class="s">sejak ${dmy(tr.since)}</span>` : '') +
@@ -336,6 +339,27 @@
       `<div class="l">Likuiditas</div><div><span class="tier" style="background:${TIER_BG[st.tier] || '#ddd'}">Tier ${esc(st.tier)}</span> <span class="s">${TIER_TXT[st.tier] || ''}</span></div>` +
       `<div class="l">Trend saat ini</div><div>${trend}</div>` +
       `<div class="s" style="margin-top:7px">Klik untuk unduh seluruh data harga ${esc(st.code)} dan jalankan Backtest.</div>`;
+  }
+  // A stock with no price CSV yet: ask ChronoGaze's local trend service, which downloads
+  // its history from Yahoo Finance and reads the trend; the bubble shows a spinner meanwhile.
+  const API = window.CHRONOGAZE_TREND_API;
+  function loadTrend(code) {
+    if (TRENDS[code]) return;
+    if (!API) { TRENDS[code] = { error: true, msg: 'Data harga belum ada.' }; return; }
+    TRENDS[code] = { loading: true };
+    fetch(`${API}/trend?code=${encodeURIComponent(code)}`)
+      .then(r => r.json())
+      .catch(() => ({ error: true, msg: 'Gagal menghubungi layanan trend ChronoGaze.' }))
+      .then(res => {
+        if (res.error) delete TRENDS[code];       // try again on the next hover
+        else TRENDS[code] = res;
+        if (tipFor && STOCKS[+tipFor.dataset.s].code === code) {
+          const shown = res.error ? { ...res } : res;
+          if (res.error) TRENDS[code] = shown;    // show the message for this hover only
+          tipEl.innerHTML = tipHtml(tipFor);
+          if (res.error) delete TRENDS[code];
+        }
+      });
   }
   function placeTip(e) {
     const pad = 14, w = tipEl.offsetWidth, h = tipEl.offsetHeight;

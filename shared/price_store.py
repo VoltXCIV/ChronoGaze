@@ -13,10 +13,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from shared.config import IDX_SUFFIX, PROJECT_ROOT
+from shared.config import DATA_DIR, IDX_SUFFIX, PROJECT_ROOT
 
 PRICES_DIR = PROJECT_ROOT / "db" / "prices"
-START = "2023-01-01"          # enough swings for the trend rules
+START = None                  # None = the whole history Yahoo Finance has (period="max")
 BATCH = 50
 
 
@@ -30,7 +30,7 @@ def _frame(raw: pd.DataFrame) -> pd.DataFrame:
     return df.sort_values("Date").drop_duplicates("Date").reset_index(drop=True)
 
 
-def download_prices(codes: list[str], start: str = START, out_dir: Path = PRICES_DIR,
+def download_prices(codes: list[str], start: str | None = START, out_dir: Path = PRICES_DIR,
                     log=print) -> dict[str, list[str]]:
     """Download and save daily bars for `codes`. Returns {"ok": [...], "failed": [...]}."""
     import yfinance as yf
@@ -39,7 +39,8 @@ def download_prices(codes: list[str], start: str = START, out_dir: Path = PRICES
     ok, failed = [], []
     for k in range(0, len(codes), BATCH):
         part = codes[k:k + BATCH]
-        raw = yf.download([c + IDX_SUFFIX for c in part], start=start, interval="1d", auto_adjust=True,
+        span = {"start": start} if start else {"period": "max"}
+        raw = yf.download([c + IDX_SUFFIX for c in part], **span, interval="1d", auto_adjust=True,
                           group_by="ticker", progress=False, threads=True)
         for code in part:
             sym = code + IDX_SUFFIX
@@ -54,6 +55,37 @@ def download_prices(codes: list[str], start: str = START, out_dir: Path = PRICES
             ok.append(code)
         log(f"{min(k + BATCH, len(codes))}/{len(codes)} diproses · {len(ok)} tersimpan · {len(failed)} gagal")
     return {"ok": ok, "failed": failed}
+
+
+def price_files(data_dir: Path = DATA_DIR, prices_dir: Path = PRICES_DIR) -> dict[str, Path]:
+    """{"AMMN": Path, ...}: a daily price CSV per IDX code. Looked for in `data_dir`
+    ("IDX_AMMN, 1D.csv", "IDX_AMMN, 1D (Yahoo).csv" or "AMMN.csv") and in `prices_dir`
+    ("AMMN.csv"); when a code has several files the newest one wins."""
+    import re
+    found = []
+    for d in (data_dir, prices_dir):
+        for f in d.glob("*.csv") if d.is_dir() else []:
+            m = re.match(r"IDX_([A-Z0-9]+), 1D\b", f.stem) or re.fullmatch(r"([A-Z0-9]{2,8})", f.stem)
+            if m:
+                found.append((m[1], f, f.stat().st_mtime))
+    out: dict[str, tuple[Path, float]] = {}
+    for code, f, mt in found:
+        if code not in out or mt > out[code][1]:
+            out[code] = (f, mt)
+    return {code: f for code, (f, _) in out.items()}
+
+
+def trend_of_file(path: Path, data_dir: Path = DATA_DIR) -> dict:
+    """Current trend (shared.trend.stock_trend) of one price CSV, plus where the data came from."""
+    from shared.csv_loader import load_ohlc_csv
+    from shared.trend import stock_trend
+    try:
+        stem = Path(path).stem
+        own = Path(path).parent == data_dir and stem.startswith("IDX_") and "(Yahoo)" not in stem
+        src = "data/" if own else "Yahoo Finance"
+        return {**stock_trend(load_ohlc_csv(path)), "src": src}
+    except Exception:
+        return {"trend": "", "since": "", "last": "", "error": True}
 
 
 def download_full_history(code: str, out_dir: Path) -> Path:

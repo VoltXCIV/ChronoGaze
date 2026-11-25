@@ -13,8 +13,29 @@ def test_basic_high_then_low():
     assert find_swings(h, l) == [(1, "SH"), (3, "SL")]
 
 
-def test_equal_neighbour_is_not_a_swing():
+def test_equal_highs_at_top_mark_rightmost():
+    # bars 1 and 2 share the top high 12 -> the rightmost of them is the swing high
     h, l = bars([10, 12, 12, 9], [8, 9, 9, 8.5])
+    assert find_swings(h, l) == [(2, "SH")]
+
+
+def test_equal_lows_at_bottom_mark_rightmost():
+    # the case from the AADI chart: two bars with exactly the same bottom low
+    h, l = bars([20, 19, 18, 17, 18, 19], [15, 14, 12, 12, 13, 14])
+    assert find_swings(h, l) == [(3, "SL")]
+
+
+def test_three_equal_highs_mark_rightmost():
+    h, l = bars([10, 12, 12, 12, 11], [5, 6, 6, 6, 6])
+    assert find_swings(h, l) == [(3, "SH")]
+
+
+def test_flat_run_that_is_not_a_peak_is_no_swing():
+    # equal highs on a staircase up (higher bar after the run) -> not a swing high
+    h, l = bars([10, 12, 12, 13, 12], [5, 6, 6, 7, 7])
+    assert find_swings(h, l) == [(3, "SH")]
+    # a flat run at the very start has no lower bar before it
+    h, l = bars([12, 12, 11, 10], [6, 6, 5, 4])
     assert find_swings(h, l) == []
 
 
@@ -125,3 +146,11 @@ def test_mother_candle_mask():
     h, l = bars([10, 12, 11, 9, 10], [8, 10, 10.5, 7, 8])
     # bar 2 is inside bar 1 -> bar 1 is the mother candle
     assert mother_candle_mask(h, l).tolist() == [False, True, False, False, False]
+
+
+def test_denoised_equal_lows_mark_rightmost():
+    from shared.swing_detector import denoised_swings
+    h, l = bars([20, 19, 18, 17, 18, 19], [15, 14, 12, 12, 13, 14])
+    assert denoised_swings(h, l, 1) == [(3, "SL")]
+    # blocks of 2: [15,14] [12,12] [13,14] -> block lows 14, 12, 13 -> block 1 is a swing low
+    assert denoised_swings(h, l, 2) == [(3, "SL")]

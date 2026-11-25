@@ -24,7 +24,8 @@ from shared.moon_phases import EMOJI, load_moon_db, load_sign_sectors, nearest_b
 from shared.tag_db import load_idx_tags, load_moon_sign_tags, load_planet_sign_tags
 from shared.tg_backtest import RATIOS as TG_RATIOS, run_tg_backtest
 from shared.sun_signs import SYMBOLS as SUN_SYMBOLS, TAG_DB_PATH, load_sun_ingress_db, load_sun_sign_tags, sun_sign_segments
-from shared.price_store import PRICES_DIR, download_full_history
+from shared.price_store import PRICES_DIR, download_full_history, price_files, trend_of_file
+from shared.trend_api import start_trend_api
 from shared.trend import stock_trend
 from shared.swing_detector import (TAG_SWING_HIGH, TAG_SWING_LOW, denoised_swings, mother_candle_mask,
                                    swing_moves, tag_bars)
@@ -176,31 +177,21 @@ def idx_tags(mtime: float) -> list[dict]:
     return [s for s in load_idx_tags() if s["tier"]] if mtime else []
 
 
-def stock_price_files() -> dict[str, Path]:
-    """{"AMMN": Path, ...}: a daily price CSV per IDX code, from data/ ("IDX_AMMN, 1D.csv")
-    or db/prices/ ("AMMN.csv", see shared/price_store.py); the newest file wins."""
-    import re
-    found = [(re.match(r"IDX_([A-Z0-9]+), 1D\b", f.stem), f) for f in DATA_DIR.glob("IDX_*.csv")]
-    found += [(re.fullmatch(r"([A-Z0-9]+)", f.stem), f) for f in PRICES_DIR.glob("*.csv")]
-    out: dict[str, Path] = {}
-    for m, f in found:
-        if m and (m[1] not in out or f.stat().st_mtime > out[m[1]].stat().st_mtime):
-            out[m[1]] = f
-    return out
-
-
 @st.cache_data
 def _stock_trend(path: str, mtime: float) -> dict:
-    try:
-        src = "data/" if Path(path).parent == DATA_DIR else "Yahoo Finance"
-        return {**stock_trend(load_ohlc_csv(path)), "src": src}
-    except Exception:
-        return {"trend": "", "since": "", "last": "", "error": True}
+    return trend_of_file(Path(path), DATA_DIR)
 
 
 def stock_trends() -> dict[str, dict]:
-    """Current trend (shared.trend rules) per IDX code that has a daily price CSV."""
-    return {code: _stock_trend(str(f), f.stat().st_mtime) for code, f in stock_price_files().items()}
+    """Current trend (shared.trend rules) per IDX code that has a daily price CSV
+    (data/ or db/prices/, see shared.price_store.price_files)."""
+    return {code: _stock_trend(str(f), f.stat().st_mtime) for code, f in price_files(DATA_DIR, PRICES_DIR).items()}
+
+
+@st.cache_resource
+def trend_api_port() -> int:
+    """Local service the Aspect Calendar asks on hover for a stock with no price data yet."""
+    return start_trend_api()
 
 
 def astronomy_view(html: str, page: str, css: str) -> str:
@@ -215,7 +206,7 @@ def astronomy_view(html: str, page: str, css: str) -> str:
         rules = json.dumps(planet_sign_tags(tag_db_mtime())).replace("</", "<\\/")
         stocks = json.dumps(idx_tags(tag_db_mtime())).replace("</", "<\\/")
         trends = json.dumps(stock_trends()).replace("</", "<\\/")
-        extra += f"<script>window.CHRONOGAZE_PLANET_SIGNS={rules};window.CHRONOGAZE_IDX={stocks};window.CHRONOGAZE_TRENDS={trends};{ASTRO_PATCH_ASPECT_CALENDAR}</script>"
+        extra += f"<script>window.CHRONOGAZE_PLANET_SIGNS={rules};window.CHRONOGAZE_IDX={stocks};window.CHRONOGAZE_TRENDS={trends};window.CHRONOGAZE_TREND_API='http://127.0.0.1:{trend_api_port()}';{ASTRO_PATCH_ASPECT_CALENDAR}</script>"
     else:
         sectors = json.dumps(moon_sign_tags(tag_db_mtime())).replace("</", "<\\/")
         extra += f"<script>window.CHRONOGAZE_SECTORS={sectors};{ASTRO_PATCH_MOON_SECTORS}</script>"
@@ -790,7 +781,10 @@ TG_VIEWS = [("🧮 Calculator", "tg"), ("📊 Backtest", "tg_backtest")]
 NAV_GROUPS = [
     ("tg", NAV_TIME_GEOMETRY, TG_VIEWS),
     ("astro", NAV_ASTRONOMY, [(label, view) for label, view, _, _ in ASTRO_VIEWS]),
+    ("gann", "📐 Gann", []),      # not built yet: a single "Coming Soon" page
+    ("bazi", "☯️ BaZi", []),
 ]
+COMING_SOON = {"gann", "bazi"}
 
 
 def load_data_menu() -> None:
@@ -847,7 +841,8 @@ def _nav_select(item: str) -> None:
 
 
 def _nav_group(view: str) -> tuple[str, str, list]:
-    return next(g for g in NAV_GROUPS if any(v == view for _, v in g[2]))
+    """The tool holding `view`; a tool without views is selected by its own key."""
+    return next(g for g in NAV_GROUPS if g[0] == view and not g[2] or any(v == view for _, v in g[2]))
 
 
 def _nav_toggle(group: str) -> None:
@@ -865,11 +860,15 @@ def nav_tree() -> tuple[str, str, str]:
     indented below it. Returns (tool label, view key, view label)."""
     st.markdown(NAV_CSS, unsafe_allow_html=True)
     sel = st.session_state.setdefault("nav_sel", "tg")
-    if not any(v == sel for g in NAV_GROUPS for _, v in g[2]):
+    if not any(v == sel for g in NAV_GROUPS for _, v in g[2]) and sel not in COMING_SOON:
         sel = st.session_state["nav_sel"] = "tg"
     current = _nav_group(sel)[0]
     with st.container(key="navtree"):
         for group, label, items in NAV_GROUPS:
+            if not items:   # a tool with no views: one plain item, no fold arrow
+                st.button(label, key=f"navp_{group}", use_container_width=True,
+                          type="secondary" if sel == group else "tertiary", on_click=_nav_select, args=(group,))
+                continue
             is_open = st.session_state.setdefault(f"nav_open_{group}", group == current)
             st.button(f"{label}  {'⌄' if is_open else '›'}", key=f"navp_{group}", use_container_width=True,
                       type="secondary" if group == current and not is_open else "tertiary",
@@ -879,7 +878,7 @@ def nav_tree() -> tuple[str, str, str]:
                     st.button(child, key=f"navc_{view}", use_container_width=True,
                               type="secondary" if sel == view else "tertiary", on_click=_nav_select, args=(view,))
     _, tool, items = _nav_group(sel)
-    return tool, sel, next(child for child, v in items if v == sel)
+    return tool, sel, next((child for child, v in items if v == sel), "")
 
 
 def open_stock_from_calendar() -> None:
@@ -951,8 +950,12 @@ else:
 # ---------------------------------------------------------------- chosen tool
 st.divider()
 page = TIME_GEOMETRY_PAGE if nav == NAV_TIME_GEOMETRY else ASTRONOMY_PAGE
-st.subheader(f"{nav} · {nav_view_label}")
-if nav_view == "tg_backtest":
+st.subheader(f"{nav} · {nav_view_label}" if nav_view_label else nav)
+if nav_view in COMING_SOON:
+    st.markdown('<div style="display:flex;align-items:center;justify-content:center;min-height:420px">'
+                '<span style="font-size:64px;font-weight:700;letter-spacing:.02em;opacity:.75">Coming Soon</span>'
+                '</div>', unsafe_allow_html=True)
+elif nav_view == "tg_backtest":
     render_tg_backtest()
 elif not page.exists():
     st.error(f"File tidak ditemukan: `{page}`")

@@ -5,8 +5,11 @@ Rules:
      not change swing detection and is not drawn on the chart.
   2. Swing high candidate: High[N] > High[N-1] and High[N] > High[N+1].
      Swing low candidate:  Low[N]  < Low[N-1]  and Low[N]  < Low[N+1].
-     (Strict: an equal neighbour means no candidate. The first and last bar
-     can never be candidates because one neighbour is missing.)
+     Flat top / bottom: when several bars in a row share exactly the same
+     High (or Low), the run counts as one peak (or trough) if the bar before
+     the run and the bar after it are both lower (or higher). The rightmost
+     bar of the run is the candidate. The first and last bar can never be
+     candidates because one neighbour is missing.
   3. Swings alternate HIGH / LOW. Consecutive candidates of the same type
      with no opposite swing between them collapse to one: the highest high
      (or lowest low). On an exact tie the newest bar wins.
@@ -34,12 +37,25 @@ def inside_bar_mask(high: np.ndarray, low: np.ndarray) -> np.ndarray:
     return inside
 
 
+def _before_run(values: np.ndarray, i: int) -> int:
+    """Index of the last bar before i whose value differs from values[i] (-1 if none)."""
+    k = i - 1
+    while k >= 0 and values[k] == values[i]:
+        k -= 1
+    return k
+
+
 def _candidates(high: np.ndarray, low: np.ndarray) -> list[tuple[int, bool, bool]]:
-    """(bar index, is_high_candidate, is_low_candidate) for bars that qualify."""
+    """(bar index, is_high_candidate, is_low_candidate) for bars that qualify.
+
+    Bar i closes a run of equal values when values[i+1] differs; the run is
+    a peak (trough) when the bars on both sides of it are lower (higher).
+    A run of one bar is the usual strict neighbour test."""
     out = []
     for i in range(1, len(high) - 1):
-        is_high = high[i] > high[i - 1] and high[i] > high[i + 1]
-        is_low = low[i] < low[i - 1] and low[i] < low[i + 1]
+        kh, kl = _before_run(high, i), _before_run(low, i)
+        is_high = high[i] > high[i + 1] and kh >= 0 and high[i] > high[kh]
+        is_low = low[i] < low[i + 1] and kl >= 0 and low[i] < low[kl]
         if is_high or is_low:
             out.append((i, bool(is_high), bool(is_low)))
     return out
