@@ -716,7 +716,6 @@ def show_sign_section(result: dict, body: str, run_id: int) -> None:
         "Periode": summ["periods"], "Bar/periode": summ["avg_bars"],
         "Rata² perubahan": summ["avg_change"], "Median": summ["median_change"],
         "% Naik": summ["pct_up"], "% Turun": summ["pct_down"],
-        "% Periode ada swing": summ["pct_with_swing"],
         "Swing H / L": [f"{h} / {l}" for h, l in zip(summ["swings_high"], summ["swings_low"])],
         "% Trend berubah": summ["pct_trend_changed"],
         "Sampel ingress": summ["ingress_samples"], "% Swing saat masuk": summ["ingress_pct_swing"],
@@ -724,15 +723,18 @@ def show_sign_section(result: dict, body: str, run_id: int) -> None:
                                     for h, l in zip(summ["ingress_pct_high"], summ["ingress_pct_low"])],
         "Lift masuk": summ["ingress_lift"],
         "Lolos": summ["ingress_passed"].map({True: "✓", False: ""})})
-    st.dataframe(idn_styler(view, {
+    # ⚠️ next to a period count below the minimum sample size; the CSV keeps the plain number
+    min_n = int(result["meta"]["min_samples"])
+    shown = view.assign(Periode=[f"{idn(n, '{:,}')} ⚠️" if n < min_n else idn(n, "{:,}") for n in summ["periods"]])
+    st.dataframe(idn_styler(shown, {
         "Bar/periode": "{:.1f}", "Rata² perubahan": "{:+.2f}%", "Median": "{:+.2f}%", "% Naik": "{:.0f}%",
-        "% Turun": "{:.0f}%", "% Periode ada swing": "{:.0f}%", "% Trend berubah": "{:.0f}%",
+        "% Turun": "{:.0f}%", "% Trend berubah": "{:.0f}%",
         "% Swing saat masuk": "{:.1f}%", "Lift masuk": "{:.2f}×"}),
         hide_index=True, use_container_width=True)
     st.caption(f"Kolom *saat masuk* menilai momen {body} masuk rasi seperti event lain: ada swing dalam "
                "±jendela hari? Lolos = memenuhi filter % swing dan sampel minimal. Sebuah bar harian dihitung milik "
                f"rasi tempat {body} berada pada jam 12:00 WIB; periode tanpa bar bursa (mis. Moon di akhir pekan) "
-               "tidak dihitung.")
+               f"tidak dihitung. ⚠️ = jumlah periode di bawah sampel minimal ({min_n}), hasilnya kurang bisa dipercaya.")
     st.download_button("⬇ Download CSV", view.to_csv(index=False).encode("utf-8"),
                        file_name=f"backtest_{run_id}_{body.lower()}_in_sign.csv", mime="text/csv",
                        key=f"bt_sign_csv_{run_id}_{body}")
