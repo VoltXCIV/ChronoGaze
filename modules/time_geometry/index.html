@@ -163,14 +163,19 @@ tr.detail .lost{opacity:.45;text-decoration:line-through}
 .detail .cx{color:var(--red-ink);font-weight:500}
 .series.low tr.detail .lost{opacity:.45;text-decoration:line-through}
 .detail .cx{color:var(--yel-ink)}
-td.score{width:1%}
+/* ChronoGaze: kolom Hit menggantikan kolom Bar; kolom Skor mengisi sisa lebar tabel */
+.hits{width:1%;text-align:center}
+td.score{width:100%}
 .meter{display:flex;align-items:center;gap:8px}
-.bar{height:8px;border-radius:2px;background:var(--red);min-width:2px}
+.track{flex:1;min-width:80px;height:8px;border-radius:2px;background:var(--line)}
+.bar{display:block;height:8px;border-radius:2px;background:var(--red);min-width:2px}
+.meter .num{min-width:3.2em;text-align:right}
+.meter .rk{min-width:2.6em}
 .series.low .bar{background:var(--yel)}
 .rank{display:inline-block;font-size:11px;padding:1px 6px;border-radius:3px;background:var(--red-soft);color:var(--red-ink);font-weight:600}
 .series.low .rank{background:var(--yel-soft);color:var(--yel-ink)}
 .dow{color:var(--muted);font-size:12.5px;margin-left:6px}
-@media (max-width:480px){.meter .hint{display:none}.dow{font-size:11.5px;margin-left:4px}}
+@media (max-width:480px){.track{min-width:48px}.dow{font-size:11.5px;margin-left:4px}}
 .empty{color:var(--muted);font-size:14px;padding:12px 0}
 .onboard{display:grid;gap:14px}
 .onboard ol{margin:0;padding:0;list-style:none;display:grid;gap:10px;counter-reset:s}
@@ -385,12 +390,12 @@ td.score{width:1%}
 
     <div class="two v-hasil" id="results">
       <section class="panel series high">
-        <h2 class="gh">Proyeksi swing high berikutnya<button type="button" class="info" data-tip="Tanggal kandidat diurutkan kronologis. Skor adalah jumlah poin dari proyeksi yang mengenai tanggal itu. Bila beberapa rasio dari interval yang SAMA membulat ke bar yang sama, hanya poin tertinggi yang dihitung dan sisanya ditandai &quot;lebur&quot;; proyeksi dari interval berbeda tetap dijumlahkan. #1–#5 menandai lima tanggal dengan skor tertinggi yang belum lewat, sama dengan daftar Top 5. Ketuk atau klik baris untuk melihat rinciannya. Proyeksi dihitung sejak swing terakhir yang diinput, jadi tanggal yang sudah lewat ikut tampil: ditandai &quot;lewat&quot;, diredupkan, dan dipisahkan garis bertuliskan hari ini." aria-label="Keterangan" aria-expanded="false">i</button></h2>
+        <h2 class="gh">Proyeksi peak swing high berikutnya<button type="button" class="info" data-tip="Tanggal kandidat diurutkan kronologis. Skor adalah jumlah poin dari proyeksi yang mengenai tanggal itu. Bila beberapa rasio dari interval yang SAMA membulat ke bar yang sama, hanya poin tertinggi yang dihitung dan sisanya ditandai &quot;lebur&quot;; proyeksi dari interval berbeda tetap dijumlahkan. #1–#5 menandai lima tanggal dengan skor tertinggi yang belum lewat, sama dengan daftar Top 5. Ketuk atau klik baris untuk melihat rinciannya. Proyeksi dihitung sejak swing terakhir yang diinput, jadi tanggal yang sudah lewat ikut tampil: ditandai &quot;lewat&quot;, diredupkan, dan dipisahkan garis bertuliskan hari ini." aria-label="Keterangan" aria-expanded="false">i</button></h2>
         <div class="stats" id="stat-high"></div>
         <div class="tblwrap" id="res-high"></div>
       </section>
       <section class="panel series low">
-        <h2 class="gh">Proyeksi swing low berikutnya<button type="button" class="info" data-tip="Tanggal kandidat diurutkan kronologis. Skor adalah jumlah poin dari proyeksi yang mengenai tanggal itu. Bila beberapa rasio dari interval yang SAMA membulat ke bar yang sama, hanya poin tertinggi yang dihitung dan sisanya ditandai &quot;lebur&quot;; proyeksi dari interval berbeda tetap dijumlahkan. #1–#5 menandai lima tanggal dengan skor tertinggi yang belum lewat, sama dengan daftar Top 5. Ketuk atau klik baris untuk melihat rinciannya. Proyeksi dihitung sejak swing terakhir yang diinput, jadi tanggal yang sudah lewat ikut tampil: ditandai &quot;lewat&quot;, diredupkan, dan dipisahkan garis bertuliskan hari ini." aria-label="Keterangan" aria-expanded="false">i</button></h2>
+        <h2 class="gh">Proyeksi bottom swing low berikutnya<button type="button" class="info" data-tip="Tanggal kandidat diurutkan kronologis. Skor adalah jumlah poin dari proyeksi yang mengenai tanggal itu. Bila beberapa rasio dari interval yang SAMA membulat ke bar yang sama, hanya poin tertinggi yang dihitung dan sisanya ditandai &quot;lebur&quot;; proyeksi dari interval berbeda tetap dijumlahkan. #1–#5 menandai lima tanggal dengan skor tertinggi yang belum lewat, sama dengan daftar Top 5. Ketuk atau klik baris untuk melihat rinciannya. Proyeksi dihitung sejak swing terakhir yang diinput, jadi tanggal yang sudah lewat ikut tampil: ditandai &quot;lewat&quot;, diredupkan, dan dipisahkan garis bertuliskan hari ini." aria-label="Keterangan" aria-expanded="false">i</button></h2>
         <div class="stats" id="stat-low"></div>
         <div class="tblwrap" id="res-low"></div>
       </section>
@@ -702,20 +707,24 @@ function renderTable(kind,rows,series,cross,anchor){
   const nPast=rows.filter(r=>r.dt<todayUTC()).length;
   st.textContent=(nI?nI+' interval '+kind+'-ke-'+kind:'Tanpa interval sejenis')+(cross?' + jarak silang '+cross.label+' '+cross.d+' bar':'')+' · acuan '+fmtShort(anchor||series.last)+(anchor&&anchor.getTime()!==series.last.getTime()?' (swing '+kind+' terakhir '+fmtShort(series.last)+')':'')+' · '+rows.length+' tanggal kandidat'+(nPast?' ('+nPast+' sudah lewat)':'')+', skor tertinggi '+fmt(max);
   const tod=todayUTC();let nlDone=false;
-  let h='<table><thead><tr><th>Tanggal</th><th title="Jumlah bar dari swing terakhir">Bar</th><th>Skor</th></tr></thead><tbody>';
+  let h='<table><thead><tr><th>Tanggal</th><th class="hits" title="Jumlah proyeksi yang mengenai tanggal ini; yang lebur tidak dihitung">Hit</th><th>Skor</th></tr></thead><tbody>';
   rows.forEach(r=>{
-    const bars=barsBetween(series.last,r.dt);
     const k=kind+':'+key(r.dt);const open=openDetails.has(k);
     const rk=rank.get(key(r.dt));
     const past=r.dt<tod;
     if(!past&&!nlDone){nlDone=true;if(rows[0].dt<tod)h+='<tr class="nowline"><td colspan="3"><div class="nl">hari ini</div></td></tr>';}
     const det=detailHtml(r);
     h+='<tr class="hit'+(past?' past':'')+'" tabindex="0" role="button" aria-expanded="'+open+'" data-k="'+esc(k)+'"><td class="mono">'+fmtShort(r.dt)+'<span class="dow">'+DOW[r.dt.getUTCDay()]+', '+r.dt.getUTCDate()+' '+MON[r.dt.getUTCMonth()]+'</span></td>'+
-       '<td class="mono">'+bars+'</td>'+
-       '<td class="score"><div class="meter"><span class="bar" style="width:'+Math.max(2,Math.round(r.score/max*64))+'px"></span><span class="mono">'+fmt(r.score)+'</span>'+(rk?'<span class="rank">#'+rk+'</span>':'')+'<span class="hint" style="margin:0">'+r.items.filter(x=>!x.lost).length+' hit</span></div></td></tr>'+
+       '<td class="mono hits">'+hitCount(r)+'</td>'+
+       '<td class="score">'+meterHtml(r.score,max,rk||0)+'</td></tr>'+
        '<tr class="detail"'+(open?'':' hidden')+'><td colspan="3">'+det+'</td></tr>';
   });
   box.innerHTML=h+'</tbody></table>';
+}
+function hitCount(r){return r.items.filter(x=>!x.lost).length;}
+function meterHtml(score,max,rk){ // rk: undefined = tanpa slot peringkat (Top 5)
+  return '<div class="meter"><span class="track"><span class="bar" style="width:'+Math.round(score/max*1000)/10+'%"></span></span>'+
+    '<span class="mono num">'+fmt(score)+'</span>'+(rk===undefined?'':'<span class="rk">'+(rk?'<span class="rank">#'+rk+'</span>':'')+'</span>')+'</div>';
 }
 function detailHtml(r){
   return r.items.map(it=>'<span class="'+(it.lost?'lost':'')+'">'
@@ -748,13 +757,13 @@ function renderTop5(kind,rows,series,anchor,paired){
   publishTop5(kind,top);
   if(!top.length){box.innerHTML='<div class="empty">Semua tanggal proyeksi sudah lewat.</div>';return;}
   const max=top[0].score;
-  let h='<table><thead><tr><th>Peringkat</th><th>Tanggal</th><th title="Jumlah bar dari swing '+kind+' terakhir">Bar</th><th>Skor</th></tr></thead><tbody>';
+  let h='<table><thead><tr><th>Peringkat</th><th>Tanggal</th><th class="hits" title="Jumlah proyeksi yang mengenai tanggal ini; yang lebur tidak dihitung">Hit</th><th>Skor</th></tr></thead><tbody>';
   top.forEach((r,i)=>{
     const k='top5:'+kind+':'+key(r.dt);const open=openDetails.has(k);
     h+='<tr class="hit" tabindex="0" role="button" aria-expanded="'+open+'" data-k="'+esc(k)+'"><td><span class="rank">#'+(i+1)+'</span></td>'+
        '<td class="mono">'+fmtShort(r.dt)+'<span class="dow">'+DOW[r.dt.getUTCDay()]+', '+r.dt.getUTCDate()+' '+MON[r.dt.getUTCMonth()]+'</span></td>'+
-       '<td class="mono">'+barsBetween(series.last,r.dt)+'</td>'+
-       '<td class="score"><div class="meter"><span class="bar" style="width:'+Math.max(2,Math.round(r.score/max*64))+'px"></span><span class="mono">'+fmt(r.score)+'</span><span class="hint" style="margin:0">'+r.items.filter(x=>!x.lost).length+' hit</span></div></td></tr>'+
+       '<td class="mono hits">'+hitCount(r)+'</td>'+
+       '<td class="score">'+meterHtml(r.score,max)+'</td></tr>'+
        '<tr class="detail"'+(open?'':' hidden')+'><td colspan="4">'+detailHtml(r)+'</td></tr>';
   });
   box.innerHTML=h+'</tbody></table>';

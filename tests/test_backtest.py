@@ -71,3 +71,43 @@ def test_next_occurrences_gives_first_date_after():
     assert list(nx.event) == ["Mercury station direct", "Full Moon"]          # sorted by time
     assert nx.date.iloc[0] == pd.Timestamp("2024-01-02")
     assert abs(nx.time.iloc[1] - pd.Timestamp("2024-01-26 00:54")) < pd.Timedelta(minutes=5)
+
+
+def test_sign_periods_match_known_ingresses():
+    from shared.backtest import sign_periods
+    eph = load_ephemeris()
+    sp = sign_periods(eph, pd.Timestamp("2026-01-01"), pd.Timestamp("2026-12-31"))
+    leo = sp[(sp.planet == "Sun") & (sp.sign == "Leo")].iloc[0]
+    # Sun enters Leo 23/07/26 02:13 WIB and Virgo 23/08/26 09:19 WIB (Astronomy Engine)
+    assert abs(leo.start - pd.Timestamp("2026-07-23 02:13")) < pd.Timedelta(minutes=5)
+    assert abs(leo.end - pd.Timestamp("2026-08-23 09:19")) < pd.Timedelta(minutes=5)
+    moon = sp[sp.planet == "Moon"]
+    assert 150 <= len(moon) <= 170                       # ~13.4 laps x 12 signs a year
+    assert (moon.end - moon.start).max() < pd.Timedelta(days=3)
+    # consecutive stays of one body touch end to start
+    sun = sp[sp.planet == "Sun"].reset_index(drop=True)
+    assert (sun.start.iloc[1:].to_numpy() == sun.end.iloc[:-1].to_numpy()).all()
+
+
+def test_period_change_is_open_to_close():
+    from shared.backtest import evaluate_sign_periods
+    t = _tagged()
+    t["Open"] = t["High"] - 1
+    periods = pd.DataFrame({"planet": ["Sun"], "sign": ["Aries"],
+                            "start": [pd.Timestamp("2024-01-02 06:00")], "end": [pd.Timestamp("2024-01-04 18:00")]})
+    r = evaluate_sign_periods(t, periods, [""] * len(t)).iloc[0]
+    # bars 2, 3, 4 Jan (each counted at 12:00 WIB): Open of 2 Jan = 11, Close of 4 Jan = 9
+    assert r.bars == 3 and r.open_start == 11 and r.close_end == 9
+    assert abs(r.change_pct - (9 / 11 - 1) * 100) < 1e-9
+    assert r.swings_high == 1 and r.swings_low == 1
+
+
+def test_run_includes_signs_and_saves_them(tmp_path):
+    t = _tagged()
+    r = run_backtest(t, "2024-01-01", "2024-01-16", window=1, threshold=60, min_samples=1)
+    assert set(r["sign_summary"].planet) == {"Moon", "Sun", "Mercury", "Venus"}
+    assert len(r["sign_summary"]) == 48 and len(r["signs"]) > 0
+    rid = save_run(r, "TEST", "ihsg", tmp_path / "bt.sqlite")
+    with sqlite3.connect(tmp_path / "bt.sqlite") as con:
+        assert con.execute("select count(*) from sign_stats where run_id=?", (rid,)).fetchone()[0] == 48
+        assert con.execute("select count(*) from sign_periods where run_id=?", (rid,)).fetchone()[0] == len(r["signs"])

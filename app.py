@@ -14,8 +14,8 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-from shared.backtest import (DB_PATH as BACKTEST_DB, NEXT_MIN_PCT, next_occurrences, run_backtest,
-                             save_run)
+from shared.backtest import (DB_PATH as BACKTEST_DB, NEXT_MIN_PCT, SIGN_BODIES, SIGNS, next_occurrences,
+                             run_backtest, save_run)
 from shared.csv_loader import load_ohlc_csv
 from shared.ephemeris import DB_PATH as EPHEMERIS_DB, load_ephemeris
 from shared.market_holidays import load_ihsg_holidays, trades_on_weekends
@@ -599,52 +599,80 @@ def show_backtest_report(result: dict, run_id: int, name: str) -> None:
     k[1].metric("Event Diuji", idn(m['occurrences'], "{:,}"))
     k[2].metric("Lolos filter", idn(m['passed'], "{:,}"))
 
-    # ---- events
+    tabs = st.tabs(["🔭 Aspek & fase", "℞ Retrograde"] + [f"{SIGN_TAB_ICON[b]} {b} in Sign" for b in SIGN_BODIES])
+    with tabs[0]:
+        show_event_section(summary, hits, run_id)
+    with tabs[1]:
+        show_retro_section(retro)
+    for tab, body in zip(tabs[2:], SIGN_BODIES):
+        with tab:
+            show_sign_section(result, body, run_id)
+
+
+SIGN_TAB_ICON = {"Moon": "☽", "Sun": "☉", "Mercury": "☿", "Venus": "♀"}
+SIGN_SYMBOL = dict(zip(SIGNS, "♈♉♊♋♌♍♎♏♐♑♒♓"))
+TREND_NOTE = ("Trend: Uptrend = 2× Higher High dan 2× Higher Low berturut-turut; Downtrend = 2× Lower High dan "
+              "2× Lower Low; Sideways = swing high dan swing low masing-masing dalam rentang ≤3% selama lebih "
+              "dari 7 bar. Trend di suatu bar hanya memakai swing yang sudah terbentuk sebelum bar itu.")
+
+
+def show_event_section(summary: pd.DataFrame, hits: pd.DataFrame, run_id: int) -> None:
     st.markdown("**Event dengan swing ≥ filter** · aspek planet, fase bulan, stasiun Mercury/Venus")
     show_all = st.toggle("Tampilkan semua event (termasuk yang tidak lolos)", key=f"bt_all_{run_id}")
     table = summary if show_all else summary[summary["passed"]]
     if table.empty:
         st.info("Tidak ada event yang lolos filter. Coba turunkan filter % swing atau sampel minimal.")
-    else:
-        view = pd.DataFrame({
-            "Event": table["event"], "Jenis": table["kind"], "Sampel": table["samples"],
-            "Swing": table["swings"], "% Swing": table["pct_swing"], "% High": table["pct_high"],
-            "% Low": table["pct_low"], "Rata² SH → SL": table["avg_move_high"],
-            "Rata² SL → SH": table["avg_move_low"], "Lift": table["lift"], "Lolos": table["passed"]})
-        event_table(view)
-        st.download_button("⬇ Download CSV", view.to_csv(index=False).encode("utf-8"),
-                           file_name=f"backtest_{run_id}_events.csv", mime="text/csv", key=f"bt_csv_{run_id}")
-        st.caption("% High / % Low = porsi swing high / swing low di antara swing yang terjadi. "
-                   "SH → SL = perubahan dari High swing high ke Low swing low berikutnya; "
-                   "SL → SH = dari Low swing low ke High swing high berikutnya.")
-        pick = st.selectbox("Rincian kejadian untuk event", table["event"].tolist(), key=f"bt_pick_{run_id}")
-        occ = hits[hits["event"] == pick]
-        sw_label = {TAG_SWING_HIGH: "^ Swing high", TAG_SWING_LOW: "v Swing low", "": "—"}
-        # text columns so a missing value reads "—" instead of "None"
-        num = lambda x, fmt="{:,.2f}": "—" if x is None or pd.isna(x) else idn(x, fmt)
-        st.dataframe(pd.DataFrame({
-            "Waktu event (WIB)": [_dmy(t, True) for t in occ["time"]],
-            "Swing": occ["swing"].map(sw_label),
-            "Tanggal swing": [_dmy(x) for x in occ["swing_date"]],
-            "Harga swing": [num(x) for x in occ["price"]],
-            "Swing berikutnya": [_dmy(x) for x in occ["next_date"]],
-            "Harga berikutnya": [num(x) for x in occ["next_price"]],
-            "Perubahan": [num(x, "{:+.2f}%") for x in occ["pct"]],
-            "Bar": [num(x, "{:.0f}") for x in occ["bars"]]}).iloc[::-1],
-            hide_index=True, use_container_width=True)
-        st.caption(f"{len(occ)} kejadian diuji, {int((occ['swing'] != '').sum())} dengan swing. "
-                   "Kejadian tanpa swing tetap dihitung sebagai sampel.")
+        return
+    view = pd.DataFrame({
+        "Event": table["event"], "Jenis": table["kind"], "Sampel": table["samples"],
+        "Swing": table["swings"], "% Swing": table["pct_swing"], "% High": table["pct_high"],
+        "% Low": table["pct_low"], "Rata² SH → SL": table["avg_move_high"],
+        "Rata² SL → SH": table["avg_move_low"], "Lift": table["lift"], "Lolos": table["passed"]})
+    event_table(view)
+    st.download_button("⬇ Download CSV", view.to_csv(index=False).encode("utf-8"),
+                       file_name=f"backtest_{run_id}_events.csv", mime="text/csv", key=f"bt_csv_{run_id}")
+    st.caption("% High / % Low = porsi swing high / swing low di antara swing yang terjadi. "
+               "SH → SL = perubahan dari High swing high ke Low swing low berikutnya; "
+               "SL → SH = dari Low swing low ke High swing high berikutnya.")
+    pick = st.selectbox("Rincian kejadian untuk event", table["event"].tolist(), key=f"bt_pick_{run_id}")
+    show_occurrences(hits[hits["event"] == pick])
 
-    # ---- retrograde
-    st.markdown("**Periode retrograde Mercury & Venus**")
+
+def show_occurrences(occ: pd.DataFrame) -> None:
+    sw_label = {TAG_SWING_HIGH: "^ Swing high", TAG_SWING_LOW: "v Swing low", "": "—"}
+    # text columns so a missing value reads "—" instead of "None"
+    num = lambda x, fmt="{:,.2f}": "—" if x is None or pd.isna(x) else idn(x, fmt)
+    st.dataframe(pd.DataFrame({
+        "Waktu event (WIB)": [_dmy(t, True) for t in occ["time"]],
+        "Swing": occ["swing"].map(sw_label),
+        "Tanggal swing": [_dmy(x) for x in occ["swing_date"]],
+        "Harga swing": [num(x) for x in occ["price"]],
+        "Swing berikutnya": [_dmy(x) for x in occ["next_date"]],
+        "Harga berikutnya": [num(x) for x in occ["next_price"]],
+        "Perubahan": [num(x, "{:+.2f}%") for x in occ["pct"]],
+        "Bar": [num(x, "{:.0f}") for x in occ["bars"]]}).iloc[::-1],
+        hide_index=True, use_container_width=True)
+    st.caption(f"{len(occ)} kejadian diuji, {int((occ['swing'] != '').sum())} dengan swing. "
+               "Kejadian tanpa swing tetap dihitung sebagai sampel.")
+
+
+def _open_col(df: pd.DataFrame) -> pd.Series:
+    # runs saved before the switch to Open -> Close only have close_start
+    return df["open_start"] if "open_start" in df.columns else df["close_start"]
+
+
+def show_retro_section(retro: pd.DataFrame) -> None:
+    st.markdown("**Periode retrograde Mercury & Venus** · perubahan = Open bar pertama → Close bar terakhir")
     if retro.empty:
         st.info("Tidak ada periode retrograde yang utuh di dalam rentang ini.")
         return
+    if "open_start" not in retro.columns:
+        st.warning("Hasil ini dari run lama (Close → Close). Tekan **Backtest** lagi untuk menghitung Open → Close.")
     planets = retro["planet"].unique().tolist()
     for col, planet in zip(st.columns(len(planets)), planets):
         g = retro[retro["planet"] == planet]
         col.metric(f"{planet} ℞ · {len(g)} periode · rata-rata perubahan", idn(g['change_pct'].mean(), "{:+.2f}%"),
-                   help="Rata-rata perubahan Close dari bar pertama ke bar terakhir periode retrograde.")
+                   help="Rata-rata perubahan dari Open bar pertama ke Close bar terakhir periode retrograde.")
         col.caption(f"Naik {100 * (g['change_pct'] > 0).mean():.0f}% · turun {100 * (g['change_pct'] < 0).mean():.0f}% · "
                     f"trend berubah {100 * g['trend_changed'].mean():.0f}% periode")
     tl = lambda x: TREND_LABEL.get(x, x)
@@ -652,16 +680,80 @@ def show_backtest_report(result: dict, run_id: int, name: str) -> None:
         "Planet": retro["planet"],
         "Mulai (WIB)": [_dmy(t, True) for t in retro["start"]],
         "Selesai (WIB)": [_dmy(t, True) for t in retro["end"]],
-        "Bar": retro["bars"], "Close awal": retro["close_start"], "Close akhir": retro["close_end"],
+        "Bar": retro["bars"], "Open awal": _open_col(retro), "Close akhir": retro["close_end"],
         "Perubahan": retro["change_pct"],
         "Trend awal": retro["trend_start"].map(tl), "Trend akhir": retro["trend_end"].map(tl),
         "Perjalanan trend": [" → ".join(tl(x) for x in p) for p in retro["trend_path"]],
         "Trend berubah": retro["trend_changed"].map({True: "Ya", False: "Tidak"})}).iloc[::-1],
-        {"Perubahan": "{:+.2f}%", "Close awal": "{:,.2f}", "Close akhir": "{:,.2f}"}),
+        {"Perubahan": "{:+.2f}%", "Open awal": "{:,.2f}", "Close akhir": "{:,.2f}"}),
         hide_index=True, use_container_width=True)
-    st.caption("Trend: Uptrend = 2× Higher High dan 2× Higher Low berturut-turut; Downtrend = 2× Lower High dan "
-               "2× Lower Low; Sideways = swing high dan swing low masing-masing dalam rentang ≤3% selama lebih "
-               "dari 7 bar. Trend di suatu bar hanya memakai swing yang sudah terbentuk sebelum bar itu.")
+    st.caption(TREND_NOTE)
+
+
+def show_sign_section(result: dict, body: str, run_id: int) -> None:
+    if "sign_summary" not in result:
+        st.info("Run ini dibuat sebelum fitur *in Sign* ada. Tekan **Backtest** lagi untuk menghitungnya.")
+        return
+    summ = result["sign_summary"]
+    summ = summ[summ["planet"] == body]
+    stays = result["signs"]
+    stays = stays[stays["planet"] == body] if len(stays) else stays
+    st.markdown(f"**{body} in Sign** · setiap periode {body} berada di satu rasi; "
+                "perubahan = Open bar pertama → Close bar terakhir periode")
+    if summ["periods"].sum() == 0:
+        st.info(f"Tidak ada periode {body} in Sign yang utuh di dalam rentang ini.")
+        return
+    best = summ.dropna(subset=["avg_change"])
+    k = st.columns(3)
+    k[0].metric("Periode diuji", idn(int(summ["periods"].sum()), "{:,}"),
+                help=f"Rata-rata {idn(stays['days'].mean(), '{:.1f}')} hari per periode.")
+    if len(best):
+        up, dn = best.loc[best["avg_change"].idxmax()], best.loc[best["avg_change"].idxmin()]
+        k[1].metric(f"Rata-rata terbaik · {SIGN_SYMBOL[up['sign']]} {up['sign']}", idn(up["avg_change"], "{:+.2f}%"))
+        k[2].metric(f"Rata-rata terburuk · {SIGN_SYMBOL[dn['sign']]} {dn['sign']}", idn(dn["avg_change"], "{:+.2f}%"))
+    view = pd.DataFrame({
+        "Rasi": [f"{SIGN_SYMBOL[s]} {s}" for s in summ["sign"]],
+        "Periode": summ["periods"], "Bar/periode": summ["avg_bars"],
+        "Rata² perubahan": summ["avg_change"], "Median": summ["median_change"],
+        "% Naik": summ["pct_up"], "% Turun": summ["pct_down"],
+        "% Periode ada swing": summ["pct_with_swing"],
+        "Swing H / L": [f"{h} / {l}" for h, l in zip(summ["swings_high"], summ["swings_low"])],
+        "% Trend berubah": summ["pct_trend_changed"],
+        "Sampel ingress": summ["ingress_samples"], "% Swing saat masuk": summ["ingress_pct_swing"],
+        "% High / Low saat masuk": [("—" if pd.isna(h) else f"{idn(h, '{:.0f}')} / {idn(l, '{:.0f}')}")
+                                    for h, l in zip(summ["ingress_pct_high"], summ["ingress_pct_low"])],
+        "Lift masuk": summ["ingress_lift"],
+        "Lolos": summ["ingress_passed"].map({True: "✓", False: ""})})
+    st.dataframe(idn_styler(view, {
+        "Bar/periode": "{:.1f}", "Rata² perubahan": "{:+.2f}%", "Median": "{:+.2f}%", "% Naik": "{:.0f}%",
+        "% Turun": "{:.0f}%", "% Periode ada swing": "{:.0f}%", "% Trend berubah": "{:.0f}%",
+        "% Swing saat masuk": "{:.1f}%", "Lift masuk": "{:.2f}×"}),
+        hide_index=True, use_container_width=True)
+    st.caption(f"Kolom *saat masuk* menilai momen {body} masuk rasi seperti event lain: ada swing dalam "
+               "±jendela hari? Lolos = memenuhi filter % swing dan sampel minimal. Sebuah bar harian dihitung milik "
+               f"rasi tempat {body} berada pada jam 12:00 WIB; periode tanpa bar bursa (mis. Moon di akhir pekan) "
+               "tidak dihitung.")
+    st.download_button("⬇ Download CSV", view.to_csv(index=False).encode("utf-8"),
+                       file_name=f"backtest_{run_id}_{body.lower()}_in_sign.csv", mime="text/csv",
+                       key=f"bt_sign_csv_{run_id}_{body}")
+
+    pick = st.selectbox(f"Rincian periode {body} di rasi", SIGNS, key=f"bt_sign_pick_{run_id}_{body}",
+                        format_func=lambda s: f"{SIGN_SYMBOL[s]} {s}")
+    g = stays[stays["sign"] == pick]
+    if g.empty:
+        st.caption("Tidak ada periode untuk rasi ini.")
+        return
+    tl = lambda x: TREND_LABEL.get(x, x)
+    st.dataframe(idn_styler(pd.DataFrame({
+        "Masuk (WIB)": [_dmy(t, True) for t in g["start"]],
+        "Keluar (WIB)": [_dmy(t, True) for t in g["end"]],
+        "Bar": g["bars"], "Open awal": g["open_start"], "Close akhir": g["close_end"],
+        "Perubahan": g["change_pct"], "Swing H / L": [f"{h} / {l}" for h, l in zip(g["swings_high"], g["swings_low"])],
+        "Trend awal": g["trend_start"].map(tl), "Trend akhir": g["trend_end"].map(tl),
+        "Trend berubah": g["trend_changed"].map({True: "Ya", False: "Tidak"})}).iloc[::-1],
+        {"Perubahan": "{:+.2f}%", "Open awal": "{:,.2f}", "Close akhir": "{:,.2f}"}),
+        hide_index=True, use_container_width=True)
+    st.caption(TREND_NOTE)
 
 
 # ---------------------------------------------------------------- time geometry backtest

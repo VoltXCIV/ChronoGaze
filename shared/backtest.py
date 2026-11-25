@@ -17,8 +17,10 @@ the next swing low; for a swing low, Low -> High of the next swing high.
 The baseline is the same hit rate for every calendar day in the range, i.e.
 what pure chance gives; an event is only interesting if it beats it.
 
-Mercury and Venus retrograde periods also get the price change from the
-first to the last bar of the period and whether the trend changed in it.
+Mercury and Venus retrograde periods, and every stay of the Moon, Sun,
+Mercury and Venus in a zodiac sign, get the price change from the Open of
+their first bar to the Close of their last bar, the swings inside them and
+whether the trend changed. Each sign ingress is also scored like an event.
 Every run is saved to db/backtest.sqlite.
 """
 from __future__ import annotations
@@ -154,9 +156,11 @@ def _nearest_swing(k: int, w: int, swing_at: dict) -> dict | None:
     return None
 
 
-def evaluate(tagged: pd.DataFrame, events: pd.DataFrame, window: int) -> tuple[pd.DataFrame, float, int]:
-    """Occurrence table (one row per usable event) + baseline hit rate + baseline days."""
-    days, pos, has_bar, swing_at = _calendar(tagged)
+def evaluate(tagged: pd.DataFrame, events: pd.DataFrame, window: int,
+             cal: tuple | None = None) -> tuple[pd.DataFrame, float, int]:
+    """Occurrence table (one row per usable event) + baseline hit rate + baseline days.
+    `cal` is _calendar(tagged), passed in to reuse it across calls."""
+    days, pos, has_bar, swing_at = cal if cal is not None else _calendar(tagged)
     dates = tagged["Date"].dt.normalize()
     known_from, known_until = pos[dates.iloc[1]], pos[dates.iloc[-2]]
     w = int(window)
@@ -222,27 +226,132 @@ def _compress(states: list[str]) -> list[str]:
     return out
 
 
-def evaluate_retro(tagged: pd.DataFrame, periods: pd.DataFrame) -> pd.DataFrame:
-    """Price change and trend over each retrograde period (first to last bar inside it)."""
+class _Bars:
+    """Numpy view of the bars, so per-period stats stay fast for thousands of Moon stays."""
+
+    def __init__(self, data: pd.DataFrame, states: list[str]):
+        self.date = data["Date"].dt.normalize().tolist()
+        self.open, self.close = data["Open"].to_numpy(float), data["Close"].to_numpy(float)
+        self.high, self.low = data["High"].to_numpy(float), data["Low"].to_numpy(float)
+        self.sh = np.cumsum(np.r_[0, (data["Tag"] == TAG_SWING_HIGH).to_numpy()])
+        self.sl = np.cumsum(np.r_[0, (data["Tag"] == TAG_SWING_LOW).to_numpy()])
+        self.states = states
+
+    def row(self, i0: int, i1: int) -> dict:
+        """Price and trend over bars i0..i1: Open of the first bar -> Close of the last."""
+        o0, c1 = self.open[i0], self.close[i1]
+        path = _compress(self.states[i0:i1 + 1])
+        return {"bar_start": self.date[i0], "bar_end": self.date[i1], "bars": i1 - i0 + 1,
+                "open_start": float(o0), "close_end": float(c1), "change_pct": float((c1 / o0 - 1) * 100),
+                "high": float(self.high[i0:i1 + 1].max()), "low": float(self.low[i0:i1 + 1].min()),
+                "swings_high": int(self.sh[i1 + 1] - self.sh[i0]), "swings_low": int(self.sl[i1 + 1] - self.sl[i0]),
+                "trend_start": self.states[i0], "trend_end": self.states[i1],
+                "trend_path": path, "trend_changed": len(path) > 1}
+
+
+def evaluate_retro(tagged: pd.DataFrame, periods: pd.DataFrame, states: list[str] | None = None) -> pd.DataFrame:
+    """Price change (Open of the first bar -> Close of the last bar inside the period) and trend
+    over each retrograde period."""
     data = tagged.reset_index(drop=True)
     dates = data["Date"].dt.normalize()
-    states = trend_states(data)
+    bars = _Bars(data, states if states is not None else trend_states(data))
     rows = []
     for p in periods.itertuples(index=False):
         i0 = int(dates.searchsorted(p.start.normalize()))
         i1 = int(dates.searchsorted(p.end.normalize(), side="right")) - 1
         if i0 >= len(data) or i1 < i0:
             continue
-        seg = data.iloc[i0:i1 + 1]
-        c0, c1 = float(data.at[i0, "Close"]), float(data.at[i1, "Close"])
-        path = _compress(states[i0:i1 + 1])
         rows.append({"planet": p.planet, "start": p.start, "end": p.end,
-                     "days": (p.end - p.start).total_seconds() / 86400,
-                     "bar_start": dates.iloc[i0], "bar_end": dates.iloc[i1], "bars": i1 - i0 + 1,
-                     "close_start": c0, "close_end": c1, "change_pct": (c1 / c0 - 1) * 100,
-                     "high": float(seg["High"].max()), "low": float(seg["Low"].min()),
-                     "trend_start": states[i0], "trend_end": states[i1],
-                     "trend_path": path, "trend_changed": len(path) > 1})
+                     "days": (p.end - p.start).total_seconds() / 86400, **bars.row(i0, i1)})
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------- planet in sign
+SIGNS = ["Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo",
+         "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces"]
+SIGN_BODIES = ["Moon", "Sun", "Mercury", "Venus"]
+KIND_INGRESS = "Masuk rasi"
+BAR_HOUR = 12        # a daily bar belongs to the sign the planet is in at 12:00 WIB that day
+
+
+def sign_periods(eph: dict, start: pd.Timestamp, end: pd.Timestamp,
+                 bodies: list[str] = SIGN_BODIES) -> pd.DataFrame:
+    """Every stay of each body in a zodiac sign that starts and ends inside [start, end].
+
+    A stay runs from the moment the body's tropical longitude crosses into the
+    sign to the moment it crosses out (a retrograde planet can re-enter the
+    sign it just left; that is a new stay). Columns: planet, sign, start, end
+    (WIB datetimes)."""
+    ut = eph["ut"]
+    j2000 = np.datetime64("2000-01-01T12:00:00")
+    pad = 400
+    lo = (np.datetime64(start) - j2000) / np.timedelta64(1, "D") - pad
+    hi = (np.datetime64(end) - j2000) / np.timedelta64(1, "D") + pad
+    sl = slice(max(0, int(np.searchsorted(ut, lo)) - 1), int(np.searchsorted(ut, hi)) + 1)
+    u = ut[sl]
+    rows = []
+    for b in bodies:
+        lon = eph[b][sl]
+        fi = np.sort(np.concatenate([_crossings(lon, 30.0 * k) for k in range(12)]))
+        if len(fi) < 2:
+            continue
+        # sign of each stay = sign at the midpoint between two crossings
+        mid = (fi[:-1] + fi[1:]) / 2
+        lon_mid = np.interp(mid, np.arange(len(lon)), lon)
+        t = pd.to_datetime(ut_to_wib(u[0] + fi * STEP))
+        for k in range(len(fi) - 1):
+            rows.append({"planet": b, "sign": SIGNS[int(np.floor((lon_mid[k] % 360) / 30)) % 12],
+                         "start": t[k], "end": t[k + 1]})
+    df = pd.DataFrame(rows, columns=["planet", "sign", "start", "end"])
+    df = df[(df["start"].dt.normalize() >= start) & (df["end"].dt.normalize() <= end)]
+    return df.sort_values(["planet", "start"]).reset_index(drop=True)
+
+
+def evaluate_sign_periods(tagged: pd.DataFrame, periods: pd.DataFrame, states: list[str]) -> pd.DataFrame:
+    """Price change, swings and trend over each stay. A stay with no bar (e.g. a Moon stay over a
+    weekend) is left out."""
+    data = tagged.reset_index(drop=True)
+    bar_t = (data["Date"].dt.normalize() + pd.Timedelta(hours=BAR_HOUR)).to_numpy()
+    starts = np.searchsorted(bar_t, periods["start"].to_numpy(), side="left")
+    ends = np.searchsorted(bar_t, periods["end"].to_numpy(), side="left") - 1
+    bars = _Bars(data, states)
+    rows = []
+    for p, i0, i1 in zip(periods.itertuples(index=False), starts, ends):
+        if i0 >= len(data) or i1 < i0:
+            continue
+        rows.append({"planet": p.planet, "sign": p.sign, "start": p.start, "end": p.end,
+                     "days": (p.end - p.start).total_seconds() / 86400, **bars.row(int(i0), int(i1))})
+    return pd.DataFrame(rows)
+
+
+def summarize_signs(periods: pd.DataFrame, ingress: pd.DataFrame) -> pd.DataFrame:
+    """One row per body and sign: stays, price change, swings inside, trend changes, and the
+    swing rate at the ingress (from `ingress`, a summarize() table of "<Body> enters <Sign>")."""
+    rows = []
+    ing = ingress.set_index("event") if not ingress.empty else None
+    for b in SIGN_BODIES:
+        for s in SIGNS:
+            g = periods[(periods["planet"] == b) & (periods["sign"] == s)] if not periods.empty else periods
+            sh, sl = (int(g["swings_high"].sum()), int(g["swings_low"].sum())) if len(g) else (0, 0)
+            key = f"{b} enters {s}"
+            i = ing.loc[key] if ing is not None and key in ing.index else None
+            rows.append({
+                "planet": b, "sign": s, "periods": len(g),
+                "avg_bars": g["bars"].mean() if len(g) else np.nan,
+                "avg_change": g["change_pct"].mean() if len(g) else np.nan,
+                "median_change": g["change_pct"].median() if len(g) else np.nan,
+                "pct_up": 100.0 * (g["change_pct"] > 0).mean() if len(g) else np.nan,
+                "pct_down": 100.0 * (g["change_pct"] < 0).mean() if len(g) else np.nan,
+                "pct_with_swing": 100.0 * ((g["swings_high"] + g["swings_low"]) > 0).mean() if len(g) else np.nan,
+                "swings_high": sh, "swings_low": sl,
+                "pct_high": 100.0 * sh / (sh + sl) if sh + sl else np.nan,
+                "pct_trend_changed": 100.0 * g["trend_changed"].mean() if len(g) else np.nan,
+                "ingress_samples": int(i["samples"]) if i is not None else 0,
+                "ingress_pct_swing": float(i["pct_swing"]) if i is not None else np.nan,
+                "ingress_pct_high": float(i["pct_high"]) if i is not None else np.nan,
+                "ingress_pct_low": float(i["pct_low"]) if i is not None else np.nan,
+                "ingress_lift": float(i["lift"]) if i is not None else np.nan,
+                "ingress_passed": bool(i["passed"]) if i is not None else False})
     return pd.DataFrame(rows)
 
 
@@ -255,15 +364,26 @@ def run_backtest(tagged: pd.DataFrame, start, end, window: int = 1, threshold: f
         raise ValueError("rentang tanggal terlalu pendek (butuh minimal 5 bar)")
     eph = eph if eph is not None else load_ephemeris()
     events = find_events(eph, start, end)
-    hits, baseline, base_days = evaluate(data, events, window)
+    cal = _calendar(data)
+    hits, baseline, base_days = evaluate(data, events, window, cal)
     summary = summarize(hits, baseline, threshold, min_samples)
-    retro = evaluate_retro(data, retro_periods(eph, start, end))
+    states = trend_states(data)
+    retro = evaluate_retro(data, retro_periods(eph, start, end), states)
+    # planet in sign: every stay, plus the swing rate around each ingress
+    stays = sign_periods(eph, start, end)
+    signs = evaluate_sign_periods(data, stays, states)
+    ing_events = pd.DataFrame({"event": stays["planet"] + " enters " + stays["sign"], "kind": KIND_INGRESS,
+                               "time": stays["start"], "date": stays["start"].dt.normalize()})
+    ing_hits, _, _ = evaluate(data, ing_events, window, cal)
+    ingress = summarize(ing_hits, baseline, threshold, min_samples)
+    sign_summary = summarize_signs(signs, ingress)
     meta = {"start": start.strftime("%Y-%m-%d"), "end": end.strftime("%Y-%m-%d"), "window": int(window),
             "threshold": float(threshold), "min_samples": int(min_samples), "bars": len(data),
             "swings": int(data["Tag"].isin([TAG_SWING_HIGH, TAG_SWING_LOW]).sum()),
             "baseline": baseline, "baseline_days": base_days, "events": len(events),
             "occurrences": len(hits), "event_types": len(summary), "passed": int(summary["passed"].sum())}
-    return {"meta": meta, "summary": summary, "hits": hits, "retro": retro}
+    return {"meta": meta, "summary": summary, "hits": hits, "retro": retro,
+            "signs": signs, "sign_summary": sign_summary, "ingress_hits": ing_hits}
 
 
 SCHEMA = """
@@ -280,8 +400,27 @@ CREATE TABLE IF NOT EXISTS event_hits (
 CREATE TABLE IF NOT EXISTS retro_periods (
   run_id INTEGER, planet TEXT, start TEXT, "end" TEXT, bars INTEGER, close_start REAL,
   close_end REAL, change_pct REAL, high REAL, low REAL, trend_start TEXT, trend_end TEXT,
-  trend_path TEXT, trend_changed INTEGER);
+  trend_path TEXT, trend_changed INTEGER, open_start REAL);
+CREATE TABLE IF NOT EXISTS sign_stats (
+  run_id INTEGER, planet TEXT, sign TEXT, periods INTEGER, avg_bars REAL, avg_change REAL,
+  median_change REAL, pct_up REAL, pct_down REAL, pct_with_swing REAL, swings_high INTEGER,
+  swings_low INTEGER, pct_high REAL, pct_trend_changed REAL, ingress_samples INTEGER,
+  ingress_pct_swing REAL, ingress_pct_high REAL, ingress_pct_low REAL, ingress_lift REAL,
+  ingress_passed INTEGER);
+CREATE TABLE IF NOT EXISTS sign_periods (
+  run_id INTEGER, planet TEXT, sign TEXT, start TEXT, "end" TEXT, bars INTEGER, open_start REAL,
+  close_end REAL, change_pct REAL, high REAL, low REAL, swings_high INTEGER, swings_low INTEGER,
+  trend_start TEXT, trend_end TEXT, trend_path TEXT, trend_changed INTEGER);
 """
+# retro_periods.close_start is from runs before the change to Open -> Close; new runs fill open_start.
+MIGRATIONS = [("retro_periods", "open_start", "REAL")]
+
+
+def _migrate(con: sqlite3.Connection) -> None:
+    for table, col, typ in MIGRATIONS:
+        have = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+        if col not in have:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
 
 
 def save_run(result: dict, dataset: str, market: str, path: Path = DB_PATH) -> int:
@@ -290,6 +429,7 @@ def save_run(result: dict, dataset: str, market: str, path: Path = DB_PATH) -> i
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as con:
         con.executescript(SCHEMA)
+        _migrate(con)
         cur = con.execute(
             "INSERT INTO runs (created_at, dataset, market, range_start, range_end, window_days, threshold,"
             " min_samples, bars, swings, baseline, meta_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -306,12 +446,31 @@ def save_run(result: dict, dataset: str, market: str, path: Path = DB_PATH) -> i
                         [(rid, r.event, r.kind, r.time.strftime("%Y-%m-%d %H:%M"), r.swing, r.swing_date,
                           _num(r.price), r.next_date, _num(r.next_price), _int(r.bars), _num(r.pct))
                          for r in h.itertuples(index=False)])
+        fmt = lambda t: t.strftime("%Y-%m-%d %H:%M")
+        path = lambda p: " > ".join(x or "-" for x in p)
         rt = result["retro"]
-        con.executemany("INSERT INTO retro_periods VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                        [(rid, r.planet, r.start.strftime("%Y-%m-%d %H:%M"), r.end.strftime("%Y-%m-%d %H:%M"),
-                          int(r.bars), r.close_start, r.close_end, r.change_pct, r.high, r.low, r.trend_start,
-                          r.trend_end, " > ".join(x or "-" for x in r.trend_path), int(r.trend_changed))
-                         for r in rt.itertuples(index=False)])
+        con.executemany('INSERT INTO retro_periods (run_id, planet, start, "end", bars, open_start, close_end,'
+                        ' change_pct, high, low, trend_start, trend_end, trend_path, trend_changed)'
+                        ' VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                        [(rid, r.planet, fmt(r.start), fmt(r.end), int(r.bars), r.open_start, r.close_end,
+                          r.change_pct, r.high, r.low, r.trend_start, r.trend_end, path(r.trend_path),
+                          int(r.trend_changed)) for r in rt.itertuples(index=False)])
+        ss = result.get("sign_summary")
+        if ss is not None and len(ss):
+            con.executemany("INSERT INTO sign_stats VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            [(rid, r.planet, r.sign, int(r.periods), _num(r.avg_bars), _num(r.avg_change),
+                              _num(r.median_change), _num(r.pct_up), _num(r.pct_down), _num(r.pct_with_swing),
+                              int(r.swings_high), int(r.swings_low), _num(r.pct_high), _num(r.pct_trend_changed),
+                              int(r.ingress_samples), _num(r.ingress_pct_swing), _num(r.ingress_pct_high),
+                              _num(r.ingress_pct_low), _num(r.ingress_lift), int(r.ingress_passed))
+                             for r in ss.itertuples(index=False)])
+        sp = result.get("signs")
+        if sp is not None and len(sp):
+            con.executemany("INSERT INTO sign_periods VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            [(rid, r.planet, r.sign, fmt(r.start), fmt(r.end), int(r.bars), r.open_start,
+                              r.close_end, r.change_pct, r.high, r.low, int(r.swings_high), int(r.swings_low),
+                              r.trend_start, r.trend_end, path(r.trend_path), int(r.trend_changed))
+                             for r in sp.itertuples(index=False)])
     return rid
 
 
