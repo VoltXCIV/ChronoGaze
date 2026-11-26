@@ -58,7 +58,7 @@ _ASTRO_COMMON_CSS = """
 .shell { grid-template-columns:1fr !important; }
 """
 ASTRO_VIEWS = [
-    ("📅 Aspect Calendar", "calendar", 1100, _ASTRO_COMMON_CSS + """
+    ("📅 Calendar", "calendar", 1100, _ASTRO_COMMON_CSS + """
 #page-calculator, #page-seeker { display:none !important; }
 """),
     ("🔍 Aspect Seeker", "seeker", 900, _ASTRO_COMMON_CSS),
@@ -190,7 +190,7 @@ def stock_trends() -> dict[str, dict]:
 
 @st.cache_resource
 def trend_api_port() -> int:
-    """Local service the Aspect Calendar asks on hover for a stock with no price data yet."""
+    """Local service the Calendar asks on hover for a stock with no price data yet."""
     return start_trend_api()
 
 
@@ -206,7 +206,10 @@ def astronomy_view(html: str, page: str, css: str) -> str:
         rules = json.dumps(planet_sign_tags(tag_db_mtime())).replace("</", "<\\/")
         stocks = json.dumps(idx_tags(tag_db_mtime())).replace("</", "<\\/")
         trends = json.dumps(stock_trends()).replace("</", "<\\/")
-        extra += f"<script>window.CHRONOGAZE_PLANET_SIGNS={rules};window.CHRONOGAZE_IDX={stocks};window.CHRONOGAZE_TRENDS={trends};window.CHRONOGAZE_TREND_API='http://127.0.0.1:{trend_api_port()}';{ASTRO_PATCH_ASPECT_CALENDAR}</script>"
+        moon = json.dumps(moon_sign_tags(tag_db_mtime())).replace("</", "<\\/")
+        sun = json.dumps(sun_sign_tags(tag_db_mtime())).replace("</", "<\\/")
+        extra += f"<script>window.CHRONOGAZE_MOON_SIGNS={moon};window.CHRONOGAZE_SUN_SIGNS={sun};"
+        extra += f"window.CHRONOGAZE_PLANET_SIGNS={rules};window.CHRONOGAZE_IDX={stocks};window.CHRONOGAZE_TRENDS={trends};window.CHRONOGAZE_TREND_API='http://127.0.0.1:{trend_api_port()}';{ASTRO_PATCH_ASPECT_CALENDAR}</script>"
     else:
         sectors = json.dumps(moon_sign_tags(tag_db_mtime())).replace("</", "<\\/")
         extra += f"<script>window.CHRONOGAZE_SECTORS={sectors};{ASTRO_PATCH_MOON_SECTORS}</script>"
@@ -377,8 +380,15 @@ def moon_records(df: pd.DataFrame) -> tuple[list[dict], list[dict]]:
     return series, markers
 
 
+def bt_next_min() -> float:
+    """Swing % an event needs to be marked / listed with its next date. Set by the
+    input under the chart's "Event Backtest" indicator (sent through the bridge)."""
+    return float(st.session_state.get("bt_next_min", NEXT_MIN_PCT))
+
+
 def backtest_next_marks(name: str) -> list[dict]:
-    """Next dates of the strong events of this data's last backtest, for the chart:
+    """Next dates of every event of this data's last backtest (enough samples), for the
+    chart, which keeps those at or above its own % input:
     [{"date": "YYYY-MM-DD", "time": "HH:MM", "event": ..., "pct": 94.7}, ...]."""
     bt = st.session_state.get("backtest")
     if not bt or bt["name"] != name or bt.get("next") is None:
@@ -388,9 +398,10 @@ def backtest_next_marks(name: str) -> list[dict]:
 
 
 def strong_event_dates(summary: pd.DataFrame, min_samples: int) -> pd.DataFrame:
-    """Next occurrence (from today, WIB) of every event with swing % >= NEXT_MIN_PCT
-    and at least `min_samples` samples. Columns of next_occurrences + the event's stats."""
-    strong = summary[(summary["pct_swing"] >= NEXT_MIN_PCT) & (summary["samples"] >= min_samples)]
+    """Next occurrence (from today, WIB) of every event with at least `min_samples`
+    samples; the swing % limit is applied when shown (bt_next_min()).
+    Columns of next_occurrences + the event's stats."""
+    strong = summary[summary["samples"] >= min_samples]
     if strong.empty:
         return pd.DataFrame(columns=["event", "kind", "time", "date", "pct_swing", "samples", "pct_high", "pct_low"])
     today = (pd.Timestamp.utcnow().tz_localize(None) + pd.Timedelta(hours=7)).normalize()
@@ -409,7 +420,7 @@ def render_chart(df: pd.DataFrame, title: str) -> None:
         {"candles": candles, "volumes": volumes, "title": title,
          "swings": swings, "mother": mother.nonzero()[0].tolist(), "denoiseMax": DENOISE_MAX,
          "moonSeries": moon_series, "moonMarkers": moon_markers,
-         "sunSegs": sun_segs, "sunInfo": sun_info, "btNext": backtest_next_marks(title)}
+         "sunSegs": sun_segs, "sunInfo": sun_info, "btNext": backtest_next_marks(title), "btNextMin": bt_next_min()}
     ).replace("</", "<\\/")
     html = (CHART_PAGE.read_text(encoding="utf-8")
             .replace("__PAYLOAD__", payload)
@@ -455,7 +466,7 @@ def render_backtest() -> None:
         min_samples = c[4].number_input("Sampel minimal", min_value=1, max_value=1000, value=10, step=1,
                                         help="Event yang terjadi lebih sedikit dari ini tidak lolos filter.")
         go = st.form_submit_button("▶ Backtest", type="primary")
-    # a click on an Emiten in the Aspect Calendar loads that stock and runs the backtest once
+    # a click on an Emiten in the Calendar loads that stock and runs the backtest once
     if st.session_state.pop("bt_autorun", False):
         go = True
     if go:
@@ -484,14 +495,17 @@ def render_backtest() -> None:
 
 
 def show_next_events(nxt: pd.DataFrame | None, meta: dict) -> None:
-    """Table of the next dates of the events with swing % >= NEXT_MIN_PCT (also marked on the chart)."""
-    st.markdown(f"**Tanggal kejadian berikutnya** · event dengan swing ≥ {NEXT_MIN_PCT:g}% "
+    """Table of the next dates of the events with swing % >= bt_next_min() (also marked on the chart)."""
+    lim = bt_next_min()
+    st.markdown(f"**Tanggal kejadian berikutnya** · event dengan swing ≥ {idn(lim, '{:g}')}% "
                 f"dan ≥ {meta['min_samples']} sampel, ditandai ◆ di chart")
+    st.caption("Batas % swing diubah lewat kotak input di bawah indikator **Event Backtest** pada chart.")
     if nxt is None:
         st.caption("Jalankan backtest lagi untuk menghitung tanggal kejadian berikutnya.")
         return
+    nxt = nxt[nxt["pct_swing"] >= lim]
     if nxt.empty:
-        st.info(f"Tidak ada event dengan swing ≥ {NEXT_MIN_PCT:g}% pada run ini.")
+        st.info(f"Tidak ada event dengan swing ≥ {idn(lim, '{:g}')}% pada run ini.")
         return
     today = (pd.Timestamp.utcnow().tz_localize(None) + pd.Timedelta(hours=7)).normalize()
     st.dataframe(pd.DataFrame({
@@ -981,6 +995,10 @@ def open_stock_from_calendar() -> None:
     from Yahoo Finance, load it as the chart data, open Astronomy · Backtest and run it."""
     import re
     code = str(st.session_state.get("cg_bridge_in", "")).split("|")[0].strip().upper()
+    # the chart's "Event Backtest" % input sends "BTMIN:65|nonce"
+    if m := re.fullmatch(r"BTMIN:(\d+(?:\.\d+)?)", code):
+        st.session_state["bt_next_min"] = min(100.0, max(0.0, float(m[1])))
+        return
     if not re.fullmatch(r"[A-Z0-9]{2,8}", code):
         return
     try:

@@ -1,4 +1,4 @@
-"""Small local HTTP service the Aspect Calendar asks for a stock's current trend.
+"""Small local HTTP service the Calendar asks for a stock's current trend.
 
 GET /trend?code=AMMN -> {"trend": ..., "since": ..., "last": ..., "src": ...}
 

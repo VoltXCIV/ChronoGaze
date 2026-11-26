@@ -1,4 +1,4 @@
-// ChronoGaze patch: "Aspect Calendar" page.
+// ChronoGaze patch: "Calendar" page (was "Aspect Calendar").
 // Uses the "Planet in Sign" sheet of Tag DB.xlsx (window.CHRONOGAZE_PLANET_SIGNS):
 // a planet standing in one of its listed signs favours the listed sectors and
 // commodities. Container 1 shows one chosen date (arrows step a day, the date
@@ -15,6 +15,10 @@
   // Current trend per code, from the daily price CSVs in data/ (shared/trend.py rules):
   // {"AMMN": {trend: "Uptrend" | "Downtrend" | "Sideways" | "", since, last}}
   const TRENDS = window.CHRONOGAZE_TRENDS || {};
+  // "Moon in Sign" sheet: {"Aries": "Otomotif; Infrastruktur; ...", ...}
+  const MOON_SIGNS = window.CHRONOGAZE_MOON_SIGNS || {};
+  // "Sun in Sign" sheet: {"Aries": {element, bias: "a; b", winners: "c; d"}, ...}
+  const SUN_SIGNS = window.CHRONOGAZE_SUN_SIGNS || {};
   const EMITEN_SHOWN = 24;   // more are behind a "+N lainnya" button
   if (!A || !wrap) return;
 
@@ -37,7 +41,7 @@
   page.id = 'page-acal';
   page.innerHTML = `
     <header>
-      <h1>Aspect <em>Calendar</em></h1>
+      <h1>Calendar</h1>
     </header>
     <section class="panel ac-one">
       <div class="ac-nav">
@@ -127,6 +131,12 @@
     .ac-tip .tr.t-up{color:#22a55b} .ac-tip .tr.t-down{color:#e5484d} .ac-tip .tr.t-side{color:#d29b0c} .ac-tip .tr.t-none{color:var(--muted)}
     .ac-tip .s{color:var(--muted);font-size:11.5px}
     .ac-empty{color:var(--muted);font-size:13.5px;padding:10px 2px}
+    .ac-grp{margin-top:16px}
+    .ac-grp:first-child{margin-top:0}
+    .ac-grp > h3{margin:0 0 8px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+    .ac-item.agree{background:var(--accent-soft);border:1px solid var(--accent)}
+    .ac-item.agree .ac-head{font-weight:600}
+    .ac-src{font-size:11.5px;color:var(--muted)}
     .ac-sub{margin:-6px 0 10px;font-size:12.5px;color:var(--muted)}
     .ac-list{display:grid}
     .ac-day{display:grid;grid-template-columns:118px 1fr;gap:14px;padding:12px 0;border-top:1px solid var(--line)}
@@ -260,6 +270,88 @@
   }
   const blockHtml = list => list.length ? `<div class="ac-items">${list.map(itemHtml).join('')}</div>` : `<div class="ac-empty">${EMPTY}</div>`;
 
+  // ---------- container 1: Moon in Sign, Sun in Sign, Planet in Sign + what all three agree on ----------
+  const splitTags = str => String(str || '').split(';').map(x => x.trim()).filter(Boolean);
+  const uniq = list => { const seen = new Set(); return list.filter(t => { const k = t.toLowerCase(); return seen.has(k) ? false : seen.add(k); }); };
+  const whenOf = seg => seg.from ? `mulai ${hm(seg.from)}` : seg.to ? `hingga ${hm(seg.to)}` : '';
+  const row = (lab, html) => `<div class="ac-row"><span class="ac-lab">${lab}</span>${html}</div>`;
+  const emRow = em => em.length ? `<div class="ac-row"><span class="ac-lab">Emiten<small>${em.length}</small></span>${emitenChips(em)}</div>` : '';
+  function moonCards(t0, t1) {
+    return signsDuring('Moon', t0, t1).map(seg => {
+      const tags = splitTags(MOON_SIGNS[seg.sign]).map(t => ({ t }));
+      const w = whenOf(seg);
+      return { tags, html: `<div class="ac-item">
+        <div class="ac-head"><span class="sym">☽&#xFE0E;</span><b>Moon</b> in <b>${esc(seg.sign)}</b>${w ? `<span class="when">${w}</span>` : ''}</div>
+        ${emRow(emitenFor(tags))}
+        ${tags.length ? row('Sector', chips(tags)) : '<div class="ac-note">Tidak ada tag untuk rasi ini di sheet Moon in Sign.</div>'}
+      </div>` };
+    });
+  }
+  function sunCards(t0, t1) {
+    return signsDuring('Sun', t0, t1).map(seg => {
+      const info = SUN_SIGNS[seg.sign] || {};
+      const bias = splitTags(info.bias).map(t => ({ t })), win = splitTags(info.winners).map(t => ({ t }));
+      const tags = uniq([...bias, ...win].map(x => x.t)).map(t => ({ t }));
+      const w = whenOf(seg);
+      return { tags, html: `<div class="ac-item">
+        <div class="ac-head"><span class="sym">☉&#xFE0E;</span><b>Sun</b> in <b>${esc(seg.sign)}</b>${info.element ? ` <span class="when">${esc(info.element)}</span>` : ''}${w ? `<span class="when">${w}</span>` : ''}</div>
+        ${emRow(emitenFor(tags))}
+        ${bias.length ? row('Bias &amp; Basket', chips(bias)) : ''}
+        ${win.length ? row('5Y Winners', chips(win)) : ''}
+        ${!tags.length ? '<div class="ac-note">Tidak ada tag untuk rasi ini di sheet Sun in Sign.</div>' : ''}
+      </div>` };
+    });
+  }
+  // Tags of one planet card (as drawn: weak / gold kept), so "agreed" can reuse them.
+  function planetTags(e) {
+    const r = e.rule, weak = weakTags(r.planet);
+    const tag = t => weak.has(t.toLowerCase()) ? { t, c: 'weak' } : { t };
+    const sector = e.boostOnly ? [] : r.sector.map(tag);
+    const commodity = e.boostOnly ? [] : r.commodity.map(tag);
+    for (const t of e.boost || []) {
+      const i = commodity.findIndex(x => x.t.toLowerCase() === t.toLowerCase());
+      if (i >= 0) commodity[i] = { t, c: 'gold' }; else commodity.push({ t, c: 'gold' });
+    }
+    return { sector, commodity };
+  }
+  // Agreed = a tag in Moon in Sign AND Sun in Sign AND Planet in Sign of the day;
+  // an emiten agrees when it carries a tag from each of the three (may be different tags).
+  function agreedHtml(moon, sun, planets) {
+    const moonSet = new Set(moon.flatMap(c => c.tags.map(x => x.t.toLowerCase())));
+    const sunSet = new Set(sun.flatMap(c => c.tags.map(x => x.t.toLowerCase())));
+    const pt = planets.map(planetTags);
+    const pSector = pt.flatMap(x => x.sector), pComm = pt.flatMap(x => x.commodity);
+    const planetSet = new Set([...pSector, ...pComm].map(x => x.t.toLowerCase()));
+    const all3 = t => moonSet.has(t) && sunSet.has(t) && planetSet.has(t);
+    const commSet = new Set(pComm.map(x => x.t.toLowerCase()));
+    const agreedTags = uniq([...pSector, ...pComm].map(x => x.t).filter(t => all3(t.toLowerCase())));
+    const sector = agreedTags.filter(t => !commSet.has(t.toLowerCase())).map(t => ({ t }));
+    const commodity = agreedTags.filter(t => commSet.has(t.toLowerCase())).map(t => ({ t }));
+    const allTags = [...pSector, ...pComm, ...moon.flatMap(c => c.tags), ...sun.flatMap(c => c.tags)];
+    const em = emitenFor(allTags).filter(m => {
+      const lc = m.hit.map(t => t.toLowerCase());
+      return lc.some(t => moonSet.has(t)) && lc.some(t => sunSet.has(t)) && lc.some(t => planetSet.has(t));
+    });
+    const body = em.length || sector.length || commodity.length
+      ? `${emRow(em)}${sector.length ? row('Sector', chips(sector)) : ''}${commodity.length ? row('Commodity', chips(commodity)) : ''}`
+      : '<div class="ac-note">Tidak ada emiten, sector, atau commodity yang disepakati ketiga aspek pada tanggal ini.</div>';
+    return `<div class="ac-item agree">
+      <div class="ac-head"><span class="sym">✓</span>Disepakati Moon in Sign, Sun in Sign &amp; Planet in Sign</div>
+      ${body}
+      <div class="ac-src">Sector/commodity: tag yang ada di ketiga aspek. Emiten: punya tag dari ketiga aspek sekaligus.</div>
+    </div>`;
+  }
+  function oneDayHtml(y, m, d) {
+    const s = dayStart(y, m, d);
+    const t0 = A.MakeTime(s), t1 = A.MakeTime(new Date(s.getTime() + DAY));
+    const planets = entriesFor(y, m, d), moon = moonCards(t0, t1), sun = sunCards(t0, t1);
+    const grp = (title, inner) => `<div class="ac-grp"><h3>${title}</h3>${inner}</div>`;
+    return grp('Disepakati ketiga aspek', `<div class="ac-items">${agreedHtml(moon, sun, planets)}</div>`) +
+      grp('Moon in Sign', `<div class="ac-items">${moon.map(c => c.html).join('')}</div>`) +
+      grp('Sun in Sign', `<div class="ac-items">${sun.map(c => c.html).join('')}</div>`) +
+      grp('Planet in Sign', blockHtml(planets));
+  }
+
   const $ = id => document.getElementById(id);
   const label = (y, m, d) => `${pad(d)} ${MON[m]} ${String(y).slice(-2)}`;
   const parts = iso => { const p = iso.split('-').map(Number); return [p[0], p[1] - 1, p[2]]; };
@@ -270,7 +362,7 @@
     const v = $('acDate').value || todayIso();
     const [y, m, d] = parts(v);
     $('acDateTxt').textContent = label(y, m, d);
-    try { $('acOne').innerHTML = blockHtml(entriesFor(y, m, d)); }
+    try { $('acOne').innerHTML = oneDayHtml(y, m, d); }
     catch (e) { $('acOne').innerHTML = `<div class="ac-empty">Perhitungan gagal: ${esc(e.message)}</div>`; }
     page.querySelectorAll('.ac-day').forEach(el => el.classList.toggle('sel', el.dataset.d === v));
   }

@@ -109,7 +109,7 @@ TREND_DENOISE = 3            # candles merged by Denoised Swing before reading a
 
 
 def stock_trend(df: pd.DataFrame, period: int = TREND_DENOISE) -> dict:
-    """Current trend of a stock (OHLC with Date, High, Low), as shown in the Aspect Calendar.
+    """Current trend of a stock (OHLC with Date, High, Low), as shown in the Calendar.
 
     Swings are marked with Denoised Swing (`period` candles), then the trend
     rules above are read; a bar with no trend counts as Sideways. Same dict as

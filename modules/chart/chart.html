@@ -241,30 +241,79 @@ window.addEventListener('storage', e => { if (e.key === 'cg.tg.top5') { loadTop5
 loadTop5();
 
 // ---------------- Backtest: next dates of strong events ----------------
-// After an Astronomy · Backtest run, every event whose swing % is at least 70%
-// gets a ◆ on the bar of its next occurrence (data.btNext). Several events on
-// one bar share a marker; the legend lists them when the crosshair is there.
-const btByTime = new Map();
+// After an Astronomy · Backtest run, every event whose swing % is at least the
+// limit in the box under the indicator (default 70%) gets a ◆ on the bar of its
+// next occurrence (data.btNext holds all events; the limit filters them here).
+// Above the % sits the event's symbol (e.g. ☉☍♅). Several events on one bar
+// share a marker; the legend lists them when the crosshair is there.
+// Changing the limit is also sent to ChronoGaze (hidden bridge input), so the
+// "Tanggal kejadian berikutnya" table under the backtest uses the same limit.
+const PLANET_SYM = { Sun: '☉', Moon: '☽', Mercury: '☿', Venus: '♀', Mars: '♂', Jupiter: '♃',
+                     Saturn: '♄', Uranus: '♅', Neptune: '♆', Pluto: '♇' };
+const ASPECT_SYM = { Conjunction: '☌', Sextile: '✶', Square: '□', Trine: '△', Opposition: '☍' };
+const PHASE_SYM = { 'New Moon': '●', 'First Quarter': '◐', 'Full Moon': '○', 'Last Quarter': '◑' };
+const ZODIAC_SYM = { Aries: '♈', Taurus: '♉', Gemini: '♊', Cancer: '♋', Leo: '♌', Virgo: '♍', Libra: '♎',
+                     Scorpio: '♏', Sagittarius: '♐', Capricorn: '♑', Aquarius: '♒', Pisces: '♓' };
+const VS = '\uFE0E';   // text style, not emoji
+function eventSym(name) {
+  if (PHASE_SYM[name]) return PHASE_SYM[name];
+  const w = name.split(' ');
+  const pl = x => PLANET_SYM[x] || x;
+  if (w.length === 3 && ASPECT_SYM[w[1]]) return pl(w[0]) + ASPECT_SYM[w[1]] + pl(w[2]);
+  if (w[1] === 'station') return pl(w[0]) + (w[2] === 'retrograde' ? '℞' : 'D');
+  if (w[1] === 'enters') return pl(w[0]) + '→' + (ZODIAC_SYM[w[2]] || w[2]);
+  return w.map(pl).join('');
+}
+const symText = s => [...s].map(c => c + (/[\u2600-\u26FF\u2190-\u21FF]/.test(c) ? VS : '')).join('');
+const btAll = new Map();
 for (const m of data.btNext || []) {
   const i = barOf(m.date);
   if (i < 0) continue;
   const t = allTimes[i];
-  if (!btByTime.has(t)) btByTime.set(t, []);
-  btByTime.get(t).push(m);
+  if (!btAll.has(t)) btAll.set(t, []);
+  btAll.get(t).push(m);
 }
 const btSeries = chart.addLineSeries({
   priceScaleId: 'btnext', color: 'rgba(0,0,0,0)', lineVisible: false,
   lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 });
-chart.priceScale('btnext').applyOptions({ visible: false, scaleMargins: { top: 0.12, bottom: 0.84 } });
-const btTimes = allTimes.filter(t => btByTime.has(t));
-btSeries.setData(btTimes.map(t => ({ time: t, value: 0 })));
-const btMarkers = btTimes.map(t => {
-  const ms = btByTime.get(t), top = Math.max(...ms.map(m => m.pct));
-  return { time: t, position: 'aboveBar', color: '#c77dff', shape: 'arrowDown',
-           text: `◆ ${top.toLocaleString('id-ID', { maximumFractionDigits: 1 })}%` + (ms.length > 1 ? ` +${ms.length - 1}` : '') };
-});
+chart.priceScale('btnext').applyOptions({ visible: false, scaleMargins: { top: 0.16, bottom: 0.8 } });
+const btPoints = allTimes.filter(t => btAll.has(t));
+btSeries.setData(btPoints.map(t => ({ time: t, value: 0 })));
+const clampPct = v => Math.min(100, Math.max(0, Math.round((+v || 0) * 10) / 10));
+let btMin = clampPct(data.btNextMin ?? 70);
+let btByTime = new Map(), btTimes = [], btMarkers = [];
+function buildBt() {
+  btByTime = new Map();
+  for (const [t, ms] of btAll) {
+    const keep = ms.filter(m => m.pct >= btMin).sort((a, b) => b.pct - a.pct);
+    if (keep.length) btByTime.set(t, keep);
+  }
+  btTimes = btPoints.filter(t => btByTime.has(t));
+  btMarkers = [];
+  for (const t of btTimes) {
+    const ms = btByTime.get(t);
+    // aboveBar markers stack upwards: the % first (next to the arrow), the symbol above it
+    btMarkers.push({ time: t, position: 'aboveBar', color: '#c77dff', shape: 'arrowDown',
+      text: `◆ ${ms[0].pct.toLocaleString('id-ID', { maximumFractionDigits: 1 })}%` + (ms.length > 1 ? ` +${ms.length - 1}` : '') });
+    btMarkers.push({ time: t, position: 'aboveBar', color: '#c77dff', shape: 'circle', size: 0,
+      text: ms.map(m => symText(eventSym(m.event))).join('  ') });
+  }
+}
+buildBt();
 let btOn = true;
+function drawBt() { btSeries.setMarkers(btOn ? btMarkers : []); }
+function sendBtMin(v) {
+  // same hidden input the Calendar uses; ChronoGaze reruns with the new limit
+  let doc;
+  try { doc = window.parent.document; } catch (e) { return; }
+  const inp = doc && doc.querySelector('.st-key-cg_bridge input');
+  if (!inp) return;
+  const setter = Object.getOwnPropertyDescriptor(inp.ownerDocument.defaultView.HTMLInputElement.prototype, 'value').set;
+  setter.call(inp, `BTMIN:${v}|${Date.now()}`);
+  inp.dispatchEvent(new Event('input', { bubbles: true }));
+  inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+}
 
 // ---------------- legend ----------------
 const byTime = new Map(data.candles.map((c, i) => [JSON.stringify(c.time), i]));
@@ -294,7 +343,7 @@ function updateLegend(p) {
   // ◆ strong backtest events whose next occurrence falls on this bar
   const bm = btOn && p && p.time !== undefined ? btByTime.get(p.time) : undefined;
   if (bm) legend.innerHTML += `<div style="margin-top:3px;color:#c77dff">◆ ${bm.map(x =>
-    `${esc(x.event)} ${x.time} WIB (${x.pct.toLocaleString('id-ID')}% swing)`).join(' · ')}</div>`;
+    `${symText(eventSym(x.event))} ${esc(x.event)} ${x.time} WIB (${x.pct.toLocaleString('id-ID')}% swing)`).join(' · ')}</div>`;
 }
 chart.subscribeCrosshairMove(updateLegend);
 
@@ -334,7 +383,7 @@ const INDICATORS = [
   { id: 'swing', name: 'Swing ^ v', def: true, excl: 'dswing', apply: on => { swingOn = on; applySwings(); } },
   { id: 'dswing', name: 'Denoised Swing', def: false, excl: 'swing', apply: on => { dswingOn = on; applySwings(); } },
   { id: 'mother', name: 'Mother Candle Swing', def: true, apply: on => { motherOn = on; applySwings(); } },
-  { id: 'btnext', name: 'Event Backtest ≥70%', def: true, apply: on => { btOn = on; btSeries.setMarkers(on ? btMarkers : []); } },
+  { id: 'btnext', name: 'Event Backtest', def: true, apply: on => { btOn = on; drawBt(); } },
   { id: 'tg', name: 'Top 5 Time Geometry', def: true, apply: on => { tgOn = on; redrawTg(); } },
   { id: 'vol', name: 'Volume', def: true, apply: on => { volOn = on; vol.applyOptions({ visible: on }); } },
 ];
@@ -362,6 +411,19 @@ INDICATORS.forEach(ind => {
       denoiseN = clampN(inp.value); inp.value = denoiseN;
       store.set('cg.denoise.n', String(denoiseN));
       applySwings();
+    });
+  }
+  if (ind.id === 'btnext') {
+    opt = document.createElement('label');
+    opt.className = 'ind-opt';
+    opt.innerHTML = `Swing ≥ <input type="number" min="0" max="100" step="1" value="${btMin}" ` +
+                    `title="Event dengan % swing minimal ini yang ditandai ◆ (0–100)"> %`;
+    list.appendChild(opt);
+    const inp = opt.querySelector('input');
+    inp.addEventListener('change', () => {
+      btMin = clampPct(inp.value); inp.value = btMin;
+      buildBt(); drawBt(); updateLegend();
+      sendBtMin(btMin);
     });
   }
   const set = on => {
