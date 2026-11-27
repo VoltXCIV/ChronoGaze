@@ -25,6 +25,7 @@ from shared.tag_db import load_idx_tags, load_moon_sign_tags, load_planet_sign_t
 from shared.tg_backtest import RATIOS as TG_RATIOS, run_tg_backtest
 from shared.sun_signs import SYMBOLS as SUN_SYMBOLS, TAG_DB_PATH, load_sun_ingress_db, load_sun_sign_tags, sun_sign_segments
 from shared.price_store import PRICES_DIR, download_full_history, price_files, trend_of_file
+from shared.price_update import update_price_file
 from shared.trend_api import start_trend_api
 from shared.trend import stock_trend
 from shared.swing_detector import (TAG_SWING_HIGH, TAG_SWING_LOW, denoised_swings, mother_candle_mask,
@@ -895,6 +896,21 @@ NAV_GROUPS = [
 COMING_SOON = {"gann", "bazi"}
 
 
+def update_message(name: str, res) -> tuple[str, str]:
+    """(level, text) shown under the Load menu after a Yahoo update."""
+    if res.status == "updated":
+        level, text = "success", f"🔄 **{name}** ({res.symbol}): {res.message}."
+    elif res.status == "up_to_date":
+        level, text = "info", f"🔄 **{name}** ({res.symbol}): {res.message} (terakhir {res.last_after})."
+    elif res.status == "skipped":
+        level, text = "info", f"🔄 **{name}** tidak di-update: {res.message}."
+    else:
+        level, text = "warning", f"🔄 **{name}** tidak di-update: {res.message}. Data lama yang dipakai."
+    if res.warnings:
+        level, text = "warning", text + " ⚠️ " + " ".join(res.warnings)
+    return level, text
+
+
 def load_data_menu() -> None:
     """Folder/upload picker and the two load buttons. On success the app reruns
     so the (then collapsed) menu and the chart show the new data."""
@@ -904,8 +920,16 @@ def load_data_menu() -> None:
         files = sorted(DATA_DIR.glob("*.csv")) if DATA_DIR.exists() else []
         if files:
             pick = st.selectbox("Pilih file", files, format_func=lambda p: p.name)
+            auto_update = st.checkbox("🔄 Update dari Yahoo Finance saat Load", value=True, key="auto_update",
+                                      help="Bar tanggal terakhir di file diganti data Yahoo, lalu bar yang lebih "
+                                           "baru ditambahkan. Baris lama tidak diubah.")
             market = load_buttons()
             if market:
+                st.session_state.pop("update_msg", None)
+                if auto_update:
+                    with st.spinner(f"Update {pick.stem} dari Yahoo Finance…"):
+                        res = update_price_file(pick)
+                    st.session_state["update_msg"] = update_message(pick.stem, res)
                 chosen = (pick.stem, pick.read_bytes(), market)
         else:
             st.info(f"Belum ada file .csv di folder:\n\n`{DATA_DIR}`")
@@ -1034,6 +1058,9 @@ with st.sidebar:
 
     if "error" in st.session_state:
         st.error(st.session_state["error"])
+    if "update_msg" in st.session_state:
+        level, text = st.session_state["update_msg"]
+        getattr(st, level)(text)
 
     if loaded:
         df = st.session_state["df"]
