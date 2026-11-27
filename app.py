@@ -14,6 +14,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
+from shared.auth import logout, require_login
 from shared.backtest import (DB_PATH as BACKTEST_DB, NEXT_MIN_PCT, SIGN_BODIES, SIGNS, next_occurrences,
                              run_backtest, save_run)
 from shared.csv_loader import load_ohlc_csv
@@ -275,6 +276,7 @@ CHART_HEIGHT = 640
 CHART_PAGE = ROOT / "modules" / "chart" / "chart.html"
 
 st.set_page_config(page_title="ChronoGaze Chart", layout="wide")
+auth_user = require_login()   # stops here with the login page until signed in
 
 
 def to_chart_records(df: pd.DataFrame) -> tuple[list[dict], list[dict]]:
@@ -1049,6 +1051,9 @@ if "df" in st.session_state and "market" not in st.session_state:
 
 with st.sidebar:
     st.markdown(BRIDGE_CSS, unsafe_allow_html=True)
+    lc, rc = st.columns([3, 2], vertical_alignment="center")
+    lc.caption(f"👤 {auth_user}")
+    rc.button("Logout", key="logout", on_click=logout, type="tertiary")
     with st.container(key="cg_bridge"):
         st.text_input("bridge", key="cg_bridge_in", on_change=open_stock_from_calendar,
                       label_visibility="collapsed")
